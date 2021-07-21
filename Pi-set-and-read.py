@@ -19,7 +19,7 @@ GPIO.setwarnings(False)  # disable warnings
 if __name__ == '__main__':
     dac = MCP4922()  # by default chooses the CE0 for chip select 1
     print("Regular setVoltage() Function")
-    select_value = int(input("Select Value: ")) # sets the voltage value
+    select_value = int(input("Select Value: ")) # sets the voltage values
     select_channel = int(input("Select Channel, 0 or 1: "))
 
     try:
