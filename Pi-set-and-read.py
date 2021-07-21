@@ -8,7 +8,7 @@ import board
 import adafruit_mcp3xxx.mcp3008 as MCP
 from adafruit_mcp3xxx.analog_in import AnalogIn
 
-spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
+spi = busio.SPI(clock=board.23, MISO=board.21, MOSI=board.19)
 cs = digitalio.DigitalInOut(board.CE1)
 mcp = MCP.MCP3008(spi, cs)
 channel = AnalogIn(mcp, MCP.P0)
@@ -19,7 +19,7 @@ GPIO.setwarnings(False)  # disable warnings
 if __name__ == '__main__':
     dac = MCP4922()  # by default chooses the CE0 for chip select 1
     print("Regular setVoltage() Function")
-    select_value = int(input("Select Value: ")) # sets the voltage valuesssss
+    select_value = int(input("Select Value: ")) # sets the voltage values
     select_channel = int(input("Select Channel, 0 or 1: "))
 
     try:
