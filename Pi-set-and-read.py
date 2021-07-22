@@ -8,7 +8,7 @@ import board
 import adafruit_mcp3xxx.mcp3008 as MCP
 from adafruit_mcp3xxx.analog_in import AnalogIn
 
-spi = busio.SPI(clock=board.23, MISO=board.21, MOSI=board.19)
+spi = busio.SPI(clock=11, MISO=9, MOSI=10)
 cs = digitalio.DigitalInOut(board.CE1)
 mcp = MCP.MCP3008(spi, cs)
 channel = AnalogIn(mcp, MCP.P0)
@@ -28,7 +28,7 @@ if __name__ == '__main__':
             dac.setVoltage(select_channel, select_value)
 
             # Read the Actual value from the sensor
-            print('Raw ADC Value: ', channel.value)
+            # print('Raw ADC Value: ', channel.value)
             print('ADC Voltage: ' + str(channel.voltage) + 'V')
             time.sleep(0.5)
 
