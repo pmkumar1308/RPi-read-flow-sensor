@@ -10,8 +10,8 @@ import adafruit_mcp3xxx.mcp3008 as MCP
 from adafruit_mcp3xxx.analog_in import AnalogIn
 
 
-spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
-cs = digitalio.DigitalInOut(board.CE1)
+spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI) # uses SPI_0 bus
+cs = digitalio.DigitalInOut(board.CE1) # chooses CE1 of SPI_0 bus
 mcp = MCP.MCP3008(spi, cs)
 channel = AnalogIn(mcp, MCP.P1)
 
@@ -21,9 +21,10 @@ i=0
 time_delay=0.001
 
 if __name__ == '__main__':
-    dac = MCP4922(spibus=1,spidevice=2) # by default chooses the CE0 for chip select
+    dac = MCP4922(spibus=1,spidevice=2) # by default chooses the CE2 of SPI_1 bus for chip select
     print("Regular setVoltage() Function")
-    select_value = int(input("Select Value: "))
+    select_value_voltage = int(input("Select Value in volts: "))
+    select_value = int(select_value_voltage/9.8) * 4096 
     select_channel = int(input("Select Channel, 0 or 1: "))
 
     try:
@@ -32,6 +33,7 @@ if __name__ == '__main__':
                 # Setting the voltage set point value
                 dac.setVoltage(select_channel, select_value)
 
+                # Reading the voltage 
                 print('ADC Voltage: ' + str(channel.voltage * 3.2) + ' V')            
                 voltage = channel.voltage * 3.2
                 log.write("{0},{1}\n".format(str(i),str(voltage)))
