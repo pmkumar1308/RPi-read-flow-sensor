@@ -20,7 +20,7 @@ GPIO.setwarnings(False)  # disable warnings
 
 MAX_SET_VAL = 3.3 # conversion factor for setting voltage based on amplification of OP-Amp
 OFFSET = 0 # if there is a offset to be included in the OP-Amp output voltage
-
+TIME_DELAY_RESPONSE = 0.002
 
 
 def convert_volt2dacVal(volt_val):
@@ -39,11 +39,13 @@ def read_store_volt(time,actual_channel,set_point_channel):
 
 def run_valve(start_time, ch_adc_act,ch_adc_set,ch_dac,set_voltage, step_volt, max_volt=1):
     constant_voltage = 2
-    while True and set_voltage < max_volt:                         
-        dac.setVoltage(ch_dac, convert_volt2dacVal(constant_voltage)) # set to 0 V
-        read_store_volt(time.time()-start,ch_adc_act, ch_adc_set)
-        print(ch_adc_act.voltage)
-        set_voltage = set_voltage + step_volt
+    while True and (time.time()-start_time)<Valve_opening_time:                         
+        dac.setVoltage(ch_dac, convert_volt2dacVal(set_voltage)) # set to 0 V
+        read_store_volt(time.time()-start_time,ch_adc_act, ch_adc_set)
+        print(ch_adc_set.voltage *3.2)
+        time.sleep(TIME_DELAY_RESPONSE)
+        # set_voltage = set_voltage + step_volt
+    time.sleep(TIME_DELAY_RESPONSE)
     dac.setVoltage(0, 0)
     dac.setVoltage(1, 0)
     dac.shutdown(0)
@@ -54,8 +56,7 @@ if __name__ == '__main__':
 
     # For DAC MCP4922
     dac = MCP4922(spibus=1,spidevice=2) # chooses the CE2 of SPI_1 bus for chip select
-    dac.setVoltage(0, 0)
-    dac.setVoltage(1, 0)
+    
     # For ADC MCP3008
     spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI) # uses SPI_0 bus
     cs = digitalio.DigitalInOut(board.CE1) # chooses CE1 of SPI_0 bus for chip select
@@ -80,16 +81,17 @@ if __name__ == '__main__':
 
     try:
         with open(file_path, "a") as log:
-            start = time.time()
-            
+            start = time.time() 
+
             # inflation
             run_valve(start,channel_actual_inf,channel_set_pt_inf,channel_dac_inf,set_volt,step_voltage_inf,max_volt = max_voltage)
             
 
             # deflation
-            # run_valve(start,channel_actual_def,channel_set_pt_def,channel_dac_def,set_volt,step_voltage_def, max_volt = max_voltage)
+            run_valve(start,channel_actual_def,channel_set_pt_def,channel_dac_def,set_volt,step_voltage_def, max_volt = max_voltage)
 
             dac.setVoltage(0, 0)
+            print("End")
             dac.setVoltage(1, 0)
             dac.shutdown(0)
             dac.shutdown(1)
@@ -103,11 +105,3 @@ if __name__ == '__main__':
         dac.shutdown(1)
         GPIO.cleanup()
         sys.exit(0)
-
-
-
- 
-
-
-
-
