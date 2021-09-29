@@ -21,10 +21,11 @@ GPIO.setwarnings(False)  # disable warnings
 MAX_SET_VAL = 3.3 # conversion factor for setting voltage based on amplification of OP-Amp
 OFFSET = 0 # if there is a offset to be included in the OP-Amp output voltage
 TIME_DELAY_RESPONSE = 0.002 # for giving the chips time to respond
-MASS_INSIDE  = 0.08
+MASS_INSIDE  = 8e-5 # in kg
+AIR_MASS_PER_LITRE = 1.292e-3 # in kg at STP
 SLOW_DEF_DELAY = 0.2 # slow deflation delay for reducing jerk
 SLOW_FLO = 0.2 # the slow flow rate to avoid jerk in l/min
-TIME_TO_FILL = 7 #3.7 # the time taken to fill the finger with 80 mg of air at STP in s
+TIME_TO_FILL = (MASS_INSIDE/AIR_MASS_PER_LITRE) * 60  # the time taken to fill the finger with 80 mg of air at STP in s
 
 
 def convert_volt2dacVal(volt_val):
