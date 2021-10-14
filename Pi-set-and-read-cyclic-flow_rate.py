@@ -21,11 +21,11 @@ GPIO.setwarnings(False)  # disable warnings
 MAX_SET_VAL = 3.3 # conversion factor for setting voltage based on amplification of OP-Amp
 OFFSET = 0 # if there is a offset to be included in the OP-Amp output voltage
 TIME_DELAY_RESPONSE = 0.002 # for giving the chips time to respond
-MASS_INSIDE  = 12e-5 # in kg
+MAX_MASS_INSIDE  = 8e-5 # in kg
 AIR_MASS_PER_LITRE = 1.292e-3 # in kg at STP
 SLOW_DEF_DELAY = 0.2 # slow deflation delay for reducing jerk
 SLOW_FLO = 0.2 # the slow flow rate to avoid jerk in l/min
-TIME_TO_FILL = (MASS_INSIDE/AIR_MASS_PER_LITRE) * 60  # the time taken to fill the finger with 80 mg of air at STP in s
+TIME_TO_FILL = (MAX_MASS_INSIDE/AIR_MASS_PER_LITRE) * 60  # the time taken to fill the finger with 80 mg of air at STP in s
 NUM_CYCLES = 10
 
 def convert_volt2dacVal(volt_val):
@@ -34,13 +34,13 @@ def convert_volt2dacVal(volt_val):
     """
     return int(((volt_val-OFFSET)/MAX_SET_VAL) * 4096)
 
-def read_store_volt(time,actual_channel,set_point_channel):
+def read_store_volt(time,actual_channel,set_point_channel, pressure_ch):
     """
     Reads and stores voltage readings from ADC in the file open in .csv format
     """
     voltage = actual_channel.voltage * 3.2
     set_pt_voltage = set_point_channel.voltage * 3.2
-    log.write("{0},{1},{2}\n".format(str(time),str (convert_volt2flow(voltage*3.2)),str(convert_volt2flow(set_pt_voltage*3.2))))
+    log.write("{0},{1},{2}\n".format(str(time),str (convert_volt2flow(voltage)),str(convert_volt2flow(set_pt_voltage), str(convert_volt2flow(pressure_ch.voltage*1.46)))))
 
 def convert_volt2flow(volt):
     flow_val = ((volt * 20)/9.8)-(4/9.8)
@@ -50,23 +50,24 @@ def convert_flow2volt(flow):
     volt_value = (9.8 * (flow + 4/9.8))/20
     return volt_value
 
-def run_valve_flow(start_time, ch_adc_act,ch_adc_set,ch_dac,flow_rate, max_volt=1, mode="Inflation"):
+def run_valve_flow(start_time, ch_adc_act,ch_adc_set,ch_dac,ch_pressure,flow_rate, max_volt=1, mode="Inflation"):
     set_voltage = 0
     valve_start_time = time.time()
-    # Valve_opening_time = MASS_INSIDE/(flow_rate*0.258/60)
+
     Valve_opening_time = TIME_TO_FILL/flow_rate # in seconds
+    Current_mass = 0
     print("run")
-    while (time.time()-valve_start_time)<Valve_opening_time and set_voltage < max_volt:
-        if mode == "Deflation" and (time.time()-valve_start_time) < SLOW_DEF_DELAY:
-            set_voltage = convert_flow2volt(flow_rate)
-            continue 
+    while Current_mass < MAX_MASS_INSIDE and set_voltage < max_volt:
+        # if mode == "Deflation" and (time.time()-valve_start_time) < SLOW_DEF_DELAY:
+        #     set_voltage = convert_flow2volt(flow_rate)
+        #     continue 
         set_voltage = convert_flow2volt(flow_rate)
-        # print(set_voltage)                       
+        print(ch_pressure.voltage*1.46)                       
         dac.setVoltage(ch_dac, convert_volt2dacVal(set_voltage)) # set to 0 V
         if mode == "Deflation":
-            read_store_volt(time.time()-start_time,ch_adc_act, ch_adc_set)
+            read_store_volt(time.time()-start_time,ch_adc_act, ch_adc_set,ch_pressure)
         time.sleep(TIME_DELAY_RESPONSE)
-        
+        Current_mass = Current_mass +  * Flow_rate
          
     time.sleep(TIME_DELAY_RESPONSE)
     dac.setVoltage(ch_dac, 0)
@@ -95,6 +96,8 @@ if __name__ == '__main__':
     channel_actual_def = AnalogIn(adc, MCP.P3) # channel for reading actual value of defflation v/v
     channel_set_pt_def = AnalogIn(adc, MCP.P4) # channel for reading set point value of defflation v/v
 
+    pressure_channel = AnalogIn(adc,MCP.P5) # channel for reading pressure voltage values
+
     op_mode = input("Please specify operation mode (m for manual and d for default): ")
 
     if op_mode ==  "m":
@@ -114,12 +117,12 @@ if __name__ == '__main__':
 
                 # inflation
                 print('Inflating')
-                run_valve_flow(start,channel_actual_inf,channel_set_pt_inf,channel_dac_inf,flow_rate_inf,max_volt = max_voltage, mode = "Inflation")
-                time.sleep(0.5)
+                run_valve_flow(start,channel_actual_inf,channel_set_pt_inf,channel_dac_inf,pressure_channel,flow_rate_inf,max_volt = max_voltage, mode = "Inflation")
+                time.sleep(0.1)
                 # deflation
                 print('Deflating')
-                run_valve_flow(start,channel_actual_def,channel_set_pt_def,channel_dac_def,flow_rate_def, max_volt = max_voltage, mode = "Deflation")
-                time.sleep(0.5)
+                run_valve_flow(start,channel_actual_def,channel_set_pt_def,channel_dac_def,pressure_channel,flow_rate_def, max_volt = max_voltage, mode = "Deflation")
+                time.sleep(0.1)
                 print("Cycle number: ", cycle)
                 cycle = cycle + 1
 
