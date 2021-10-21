@@ -53,24 +53,29 @@ def convert_flow2volt(flow):
 def run_valve_flow(start_time, ch_adc_act,ch_adc_set,ch_dac,ch_pressure,flow_rate, max_volt=1, mode="Inflation"):
     set_voltage = 0
     valve_start_time = time.time()
-
+    total_time = 0
     Valve_opening_time = TIME_TO_FILL/flow_rate # in seconds
     Current_mass = 0
     print("run")
-    while Current_mass < MAX_MASS_INSIDE and set_voltage < max_volt:
-        # if mode == "Deflation" and (time.time()-valve_start_time) < SLOW_DEF_DELAY:
-        #     set_voltage = convert_flow2volt(flow_rate)
-        #     continue 
-        set_voltage = convert_flow2volt(flow_rate)
-        print(ch_pressure.voltage*1.46)                       
+    while set_voltage < max_volt and total_time<5: 
+        loop_start_time = time.time()
+        set_voltage = convert_flow2volt(flow_rate)                     
         dac.setVoltage(ch_dac, convert_volt2dacVal(set_voltage)) # set to 0 V
-        if mode == "Deflation":
-            read_store_volt(time.time()-start_time,ch_adc_act, ch_adc_set,ch_pressure)
+        
+        # if mode == "Deflation":
+        #     read_store_volt(time.time()-start_time,ch_adc_act, ch_adc_set,ch_pressure)
         time.sleep(TIME_DELAY_RESPONSE)
-        Current_mass = Current_mass +  * Flow_rate
-         
+        if mode == "Inflation":
+            if Current_mass > MAX_MASS_INSIDE:
+                break
+            Current_mass = Current_mass +  ((time.time() - loop_start_time) /60 )* convert_volt2flow(ch_adc_act.voltage*3.2) *(AIR_MASS_PER_LITRE)
+        if mode == "Deflation":
+            if Current_mass <= 0:
+                break
+            Current_mass = Current_mass -  ((time.time() - loop_start_time) /60 )* convert_volt2flow(ch_adc_act.voltage*3.2) *(AIR_MASS_PER_LITRE)
     time.sleep(TIME_DELAY_RESPONSE)
     dac.setVoltage(ch_dac, 0)
+    total_time = total_time + (time.time()-loop_start_time)
     
         
 
@@ -119,6 +124,7 @@ if __name__ == '__main__':
                 print('Inflating')
                 run_valve_flow(start,channel_actual_inf,channel_set_pt_inf,channel_dac_inf,pressure_channel,flow_rate_inf,max_volt = max_voltage, mode = "Inflation")
                 time.sleep(0.1)
+
                 # deflation
                 print('Deflating')
                 run_valve_flow(start,channel_actual_def,channel_set_pt_def,channel_dac_def,pressure_channel,flow_rate_def, max_volt = max_voltage, mode = "Deflation")
