@@ -18,12 +18,14 @@ if os.path.exists(file_path):
 GPIO.setmode(GPIO.BCM)   # use the Broadcom pin numbering
 GPIO.setwarnings(False)  # disable warnings
 
+PRESSURE_ERROR = 3.3291960294288225
 RAMP_DELAY = 0.2 # delay to ramp the response in case of step flows
-MAX_SET_VAL = 3.3 # conversion factor for setting voltage based on amplification of OP-Amp
-VOLT_DIV_FACT = 3.2 # The step down factor in the volatge divider for Prop valves
-OFFSET = 0 # if there is a offset to be included in the OP-Amp output voltage
+MAX_SET_VAL = 3.3 #10.2 # maximum value possible for setting voltage based on amplification of OP-Amp
+FLOW_VOLT_DIV_FACT = 3.2 # The step down factor in the volatge divider for Prop valves
+PRESSURE_VOLT_DIV_FACT = 1.46
+OFFSET = 0 #0.95 # if there is a offset to be included in the OP-Amp output voltage
 TIME_DELAY_RESPONSE = 0.002 # for giving the chips time to respond
-MAX_MASS_INSIDE  = 8e-5 # in kg
+MAX_MASS_INSIDE  = 9e-5 # in kg
 AIR_MASS_PER_LITRE = 1.292e-3 # in kg at STP
 SLOW_DEF_DELAY = 0.2 # slow deflation delay for reducing jerk
 SLOW_FLO = 0.2 # the slow flow rate to avoid jerk in l/min
@@ -38,19 +40,21 @@ def convert_volt2dacVal(volt_val):
     """
     return int(((volt_val-OFFSET)/MAX_SET_VAL) * 4096)
 
-def read_store_volt(time,actual_channel,set_point_channel, pressure_ch):
+def log_data(time,actual_channel,set_point_channel, pressure_ch, mass, mode_op):
     """
     Reads and stores voltage readings from ADC in the file open in .csv format
     """
-    voltage = actual_channel.voltage * VOLT_DIV_FACT
-    set_pt_voltage = set_point_channel.voltage * VOLT_DIV_FACT
-    log.write("{0},{1},{2}\n".format(str(time),str (convert_volt2flow(voltage)),str(convert_volt2flow(set_pt_voltage), str(convert_volt2flow(pressure_ch.voltage*1.46)))))
+    if mode_op == "Deflation":
+        voltage = actual_channel.voltage 
+        set_pt_voltage = set_point_channel.voltage 
+        voltage_pressure = pressure_ch.voltage 
+        log.write("{0},{1},{2},{3},{4}\n".format(str(time),str (convert_volt2flow(voltage)),str(convert_volt2flow(set_pt_voltage)), str(convert_volt2pressure(voltage_pressure)), str(mass)))
 
 def convert_volt2flow(volt):
     """
     Converts the voltage value from the sensor to the flow rate in l/min
     """
-    flow_val = ((volt * 20)/9.8)-(4/9.8)
+    flow_val = ((volt*FLOW_VOLT_DIV_FACT* 20)/9.8)-(4/9.8)
     return flow_val
 
 def convert_flow2volt(flow):
@@ -65,7 +69,7 @@ def convert_lmin2kgs(ch_adc):
     Converts flowrate from l/min to kg/s
     """ 
 
-    kgs_val = convert_volt2flow(ch_adc.voltage*VOLT_DIV_FACT) * (AIR_MASS_PER_LITRE)/60
+    kgs_val = convert_volt2flow(ch_adc.voltage*FLOW_VOLT_DIV_FACT) * (AIR_MASS_PER_LITRE)/60
     return kgs_val
 
 def convert_kgs2lmin(flow_kgs):
@@ -76,6 +80,12 @@ def convert_kgs2lmin(flow_kgs):
     flow_lmin = flow_kgs * 60/AIR_MASS_PER_LITRE 
     return flow_lmin
 
+def convert_volt2pressure(voltage_pressure_sensor):
+    v_cc = 5.0
+    pressure = (((voltage_pressure_sensor*PRESSURE_VOLT_DIV_FACT/(v_cc))-0.04)/0.00369) + PRESSURE_ERROR
+    # voltage = self.df["pressure sensor"].to_numpy().tolist()
+
+    return pressure
 
 def interpol_fn(Mass_initial, Mass_to_reach, time_duration,num_time_steps, func_type = "Cubic"):
     """
@@ -104,18 +114,15 @@ def ramp_fn (Mass_flow_rate_final):
     m_dot = a_1*t_range
     return m_dot
 
-
-
-def run_valve_flow(start_time, time_dur, ch_adc_act,ch_adc_set,ch_dac,ch_pressure,flow_rate,Current_mass, max_volt=1, mode="Inflation"):
+def run_valve_flow(start_time,time_dur,ch_adc_act,ch_adc_set,ch_dac,ch_pressure,flow_rate,Current_mass, max_volt=1, mode="Inflation"):
     
     set_voltage = 0
-    valve_start_time = time.time()
-    total_time = 0
 
     print(Current_mass)
     print("run")
     
     
+    print("Initial Pressure: ", convert_volt2pressure(ch_pressure.voltage))
     time_steps_num = 50
     loop_start_time = time.time()
     if mode == "Inflation":
@@ -128,7 +135,10 @@ def run_valve_flow(start_time, time_dur, ch_adc_act,ch_adc_set,ch_dac,ch_pressur
             if Current_mass > MAX_MASS_INSIDE:
                 break            
             Current_mass = Current_mass +  del_t * convert_lmin2kgs(ch_adc_act)
-            print(time.time() - loop_start_time)
+            # print(time.time() - loop_start_time)
+            print("Current mass: ", Current_mass)
+            print("Current pressure: ", convert_volt2pressure(ch_pressure.voltage))
+            log_data(time.time()- loop_start_time,ch_adc_act,ch_adc_set, ch_pressure, Current_mass, mode)
 
     if mode == "Deflation":
         mass_t,flow_rate, time_range = interpol_fn(Current_mass, 0, 4, time_steps_num, func_type = "Cubic")
@@ -139,10 +149,12 @@ def run_valve_flow(start_time, time_dur, ch_adc_act,ch_adc_set,ch_dac,ch_pressur
             dac.setVoltage(ch_dac, convert_volt2dacVal(set_voltage)) 
             time.sleep(del_t)
             if Current_mass < 0.0000002:
-                CURRENT_MASS = 0 
+                Current_mass= 0 
                 break 
             Current_mass = Current_mass -  del_t * convert_lmin2kgs(ch_adc_act)
-            print(Current_mass)
+            print("Current mass: ", Current_mass)
+            print("Current pressure: ",convert_volt2pressure(ch_pressure.voltage))
+            log_data(time.time()- loop_start_time,ch_adc_act,ch_adc_set, ch_pressure, Current_mass.astype(str), mode)
 
 
     time.sleep(TIME_DELAY_RESPONSE)
