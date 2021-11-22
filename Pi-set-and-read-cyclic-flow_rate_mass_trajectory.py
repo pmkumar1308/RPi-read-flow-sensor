@@ -30,8 +30,24 @@ AIR_MASS_PER_LITRE = 1.292e-3 # in kg at STP
 SLOW_DEF_DELAY = 0.2 # slow deflation delay for reducing jerk
 SLOW_FLO = 0.2 # the slow flow rate to avoid jerk in l/min
 TIME_TO_FILL = (MAX_MASS_INSIDE/AIR_MASS_PER_LITRE) * 60  # the time taken to fill the finger with 80 mg of air at STP in s
-NUM_CYCLES = 5
+NUM_CYCLES = 1
 CURRENT_MASS =0 
+
+class CubicInterpolation;
+
+def __init__(self, Mass_initial, Mass_to_reach, time_duration):
+    self.a_0 = Mass_initial
+    self.a_1 = 0
+    self.a_2 = (3/(time_duration**2))*(Mass_to_reach - Mass_initial)
+    self.a_3 = - (2/(time_duration**3))*(Mass_to_reach - Mass_initial)
+
+
+def evaluate_interpolation(self,t):
+    return a_0 + a_1 * t + a_2 * t**2 + a_3 * t**3
+
+def evaluate_diff_interpolation(self,t):
+    return a_1 + 2 *a_2 * t + 3 * a_3 * t**2
+
 
 def convert_volt2dacVal(volt_val):
     """
@@ -100,7 +116,7 @@ def interpol_fn(Mass_initial, Mass_to_reach, time_duration,num_time_steps, func_
         a_2 = (3/(time_duration**2))*(Mass_to_reach - Mass_initial)
         a_3 = - (2/(time_duration**3))*(Mass_to_reach - Mass_initial)
         Mass_t = a_0 + a_1 * t + a_2 * t**2 + a_3 * t**3
-        Mass_dot_t = np.diff(Mass_t)/h
+        Mass_dot_t = np.diff(Mass_t)/h ## Function?
     return Mass_t, Mass_dot_t, t
 
 def ramp_fn (Mass_flow_rate_final):
@@ -121,6 +137,25 @@ def run_valve_flow(start_time,time_dur,ch_adc_act,ch_adc_set,ch_dac,ch_pressure,
     print(Current_mass)
     print("run")
     
+    cubicSpline = CubicInterpolation()
+
+    t_start = time.time()
+    t_current = time.time()
+
+
+    while t_current - t_start <= cubicSpline.completion_time:
+        t = t_current - t_start
+        flow_t = cubicSpline.getFlow(t)
+
+        set_voltage = convert_flow2volt(convert_kgs2lmin(flow_t))                                        
+        dac.setVoltage(ch_dac, convert_volt2dacVal(set_voltage))
+
+        time.sleep(0.01)
+
+        Current_mass = Current_mass +  0.01 * convert_lmin2kgs(ch_adc_act)
+
+        t_current = time.time()
+
     
     print("Initial Pressure: ", convert_volt2pressure(ch_pressure.voltage))
     time_steps_num = 50
