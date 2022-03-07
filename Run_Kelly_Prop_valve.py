@@ -23,7 +23,7 @@ MAX_SET_VALUE = 5 #Maximum voltage to be set
 MIN_SET_VALUE = 0 #Minimum voltage to be set
 OFFSET = 0
 CONTROL_OFFSET = 0
-TIME_DURATION = 7 + CONTROL_OFFSET
+TIME_DURATION = 4 + CONTROL_OFFSET
 
 """The calibrated signal read from the flow sensor is a signed
 INTEGER number (two's complement number). The
@@ -70,7 +70,7 @@ class ControlFlow:
     def contolLaw(self, controlVoltage):
         # print(self.prev_error)
         error = self.target - self.measured
-        print(error)
+        # print(error)
         controlVoltage = controlVoltage + error * self.KP + self.prev_error * self.KD + self.sum_error * self.KI
         controlVoltage = max(min(MAX_SET_VALUE, controlVoltage), MIN_SET_VALUE)
         self.prev_error = error
@@ -232,14 +232,15 @@ if __name__ == '__main__':
     t_start = time.time() + MV_AVG_DEPTH * del_t
     time_spent =0
 
-    set_voltage = 0
+    set_voltage = 2.45
 
 
     #### ---- Control gains ---- ####
-    controlKP = 0.032
-    controlKD = 0.001
-    # controlKD = float(input("Derivative Gain: "))
-    controlKI = 0
+    controlKP = 0.050
+    # controlKP = float(input("Proportional Gain: "))
+    # controlKD = 0.000
+    controlKD = float(input("Derivative Gain: "))
+    controlKI = 0.00
     # controlKI = float(input("Integral Gain: "))
     t = 0 
     try:
@@ -247,7 +248,7 @@ if __name__ == '__main__':
             Current_mass = 0
             Current_GT_mass = 0
             cubicSpline = CubicInterpolation(0, TARGET_MASS)
-            while(True  & (time_val <= TIME_DURATION) & (p_after1 < 200.0) & (Current_mass <= TARGET_MASS)): #&  (avg_flow_value>=0.5)):
+            while(True  & (time_val <= TIME_DURATION) & (p_after1 < 250.0) & (Current_mass <= TARGET_MASS)): #&  (avg_flow_value>=0.5)):
                 time_loop_start = time.time()
             	
                 flow_val = ReadSensirion(bus)               
