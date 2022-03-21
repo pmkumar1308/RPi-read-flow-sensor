@@ -28,6 +28,7 @@ MIN_SET_VALUE = 0 #Minimum voltage to be set
 OFFSET = 0
 CONTROL_OFFSET = 0
 TIME_DURATION = 4 + CONTROL_OFFSET
+CURRENT_DRIVER_SENSE_RES_VALUE = 1
 
 """The calibrated signal read from the flow sensor is a signed
 INTEGER number (two's complement number). The
@@ -65,7 +66,7 @@ class CubicInterpolation:
 
 class ControlFlow:
 
-    def __init__(self, target_value, measured_value, proportional_gain, derivative_gain, integral_gain):
+    def __init__(self, tarpythoget_value, measured_value, proportional_gain, derivative_gain, integral_gain):
         self.target = target_value
         self.measured = measured_value
         self.KP = proportional_gain
@@ -101,7 +102,7 @@ def interpol_fn(Mass_initial, Mass_to_reach, time_duration,num_time_steps, func_
         Mass_dot_t = np.diff(Mass_t)/h ## Function?
     return Mass_t, Mass_dot_t, t
 
-def log_data(time,actual_flow,target_flow,pressure, current_mass, current_gt_mass, desired_Mass, set_voltage):
+def log_data(time,actual_flow,target_flow,pressure, current_mass, current_gt_mass, desired_Mass, set_voltage, sense_current):
     """
     Reads and stores data in the file open in .csv format
     """
@@ -110,7 +111,7 @@ def log_data(time,actual_flow,target_flow,pressure, current_mass, current_gt_mas
     # set_pt_voltage = set_point_channel.voltage 
     # voltage_pressure = pressure_ch.voltage 
     today = date.today()
-    log.write("{0},{1},{2},{3},{4},{5},{6},{7}, {8}\n".format(str(today.strftime("%d/%m/%Y")),str(time),str (actual_flow),str (target_flow),str(pressure),str(current_mass),str(current_gt_mass), str(desired_Mass), str(set_voltage)))
+    log.write("{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}\n".format(str(today.strftime("%d/%m/%Y")),str(time),str (actual_flow),str (target_flow),str(pressure),str(current_mass),str(current_gt_mass), str(desired_Mass), str(set_voltage), str(sense_current)))
 
 def twosComp(val, bits):
     if (val & (1 << (bits - 1))) != 0:
@@ -203,7 +204,8 @@ def ReadSensirion(device_bus):
 
     return flow_value
 
-
+def convert_volt2current(volt):
+    return volt / CURRENT_DRIVER_SENSE_RES_VALUE
 
 
 if __name__ == '__main__':
@@ -233,7 +235,9 @@ if __name__ == '__main__':
 
 
     #Channel number for reading pressure on ADC
-    pressure_channel = 0                                                                                                                
+    pressure_channel = 0
+    sense_resistor_channel_inf = 1
+    sense_resistor_channel_def = 2                                                                                                                
 
     # For DAC
     # dac = MCP4922(spibus=1,spidevice=2) # by default chooses the CE0 for chip select
@@ -286,6 +290,7 @@ if __name__ == '__main__':
 
 
                     p_after1 = convert_volt2pressure(adc.ADS1256_GetChannalValue(pressure_channel) * 5.0/0x7fffff) # Full scale output is 0x7fffff for the ADC
+                    sense_current_inf = convert_volt2current(adc.ADS1256_GetChannalValue(sense_resistor_channel_inf) * 5.0/0x7fffff)
                     # print("Pressure in kpa: ", p_after1)                    
 
                     # Control                
@@ -310,7 +315,7 @@ if __name__ == '__main__':
                     # time_val = time.time()-t_start
                     t= time.time() - t_start - time_spent 
                     time_val = t
-                    log_data(time_val,avg_flow_value,targetFlow, avg_pressure_value, Current_mass, Current_GT_mass, desiredMass, set_voltage_inf)
+                    log_data(time_val,avg_flow_value,targetFlow, avg_pressure_value, Current_mass, Current_GT_mass, desiredMass, set_voltage_inf, sense_current_inf)
                 time_offset = time.time()-time_loop_start
                 # print("Time offset:", time_offset)
                 # Give time for sampling
@@ -349,6 +354,7 @@ if __name__ == '__main__':
 
 
                     p_after1 = convert_volt2pressure(adc.ADS1256_GetChannalValue(pressure_channel) * 5.0/0x7fffff) # Full scale output is 0x7fffff for the ADC
+                    sense_current_def = convert_volt2current(adc.ADS1256_GetChannalValue(sense_resistor_channel_def) * 5.0/0x7fffff)
                     # print("Pressure in kpa: ", p_after1)                    
 
                     # Control                
@@ -375,7 +381,7 @@ if __name__ == '__main__':
                     t= time.time() - t_start_def - time_spent 
                     time_val = time.time() - t_start - time_spent
                     # time_val_log = time.time() - t_start - time_spent
-                    log_data(time_val,-avg_flow_value,-targetFlow, avg_pressure_value, Current_mass, Current_GT_mass, desiredMass, set_voltage_def)
+                    log_data(time_val,-avg_flow_value,-targetFlow, avg_pressure_value, Current_mass, Current_GT_mass, desiredMass, set_voltage_def, sense_current_def)
                 time_offset = time.time()-time_loop_start
 
                 if (Current_mass <= 0) :
