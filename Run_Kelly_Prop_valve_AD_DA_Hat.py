@@ -28,7 +28,7 @@ MIN_SET_VALUE = 0 #Minimum voltage to be set
 OFFSET = 0
 CONTROL_OFFSET = 0
 TIME_DURATION = 4 + CONTROL_OFFSET
-CURRENT_DRIVER_SENSE_RES_VALUE = 1
+CURRENT_DRIVER_SENSE_RES_VALUE = 2.08
 
 """The calibrated signal read from the flow sensor is a signed
 INTEGER number (two's complement number). The
@@ -41,12 +41,27 @@ file_path = '/home/pi/Inflating_and_deflating_finger_data.csv'
 if os.path.exists(file_path):
     os.remove(file_path)
 
+def log_data(time,actual_flow_inf,actual_flow_def, target_flow,pressure, current_mass, current_gt_mass, desired_Mass, set_voltage, sense_current):
+    """
+    Reads and stores data in the file open in .csv format
+    """
+    
+    # voltage = actual_channel.voltage 
+    # set_pt_voltage = set_point_channel.voltage 
+    # voltage_pressure = pressure_ch.voltage 
+    today = date.today()
+    log.write("{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}\n".format(str(today.strftime("%d/%m/%Y")),str(time),str(actual_flow_inf), str(actual_flow_def),str (target_flow),str(pressure),str(current_mass),str(current_gt_mass), str(desired_Mass), str(set_voltage), str(sense_current)))
+
 def convertVolt2DacVal(volt_val):
     """
     Returns a converted value of the voltage input between a number between 0 to 4096 to be given to
     to the DAC for set point value
     """
     return int(((volt_val-OFFSET)/MAX_SET_VALUE) * 4096)
+
+def flow_start_voltage_pressure (pressure):
+    a,b,c = [0.70487578, -0.28534515 , 2.76591885]
+    return a * pressure + b * pressure**2 + c
 
 class CubicInterpolation:
 
@@ -66,7 +81,7 @@ class CubicInterpolation:
 
 class ControlFlow:
 
-    def __init__(self, tarpythoget_value, measured_value, proportional_gain, derivative_gain, integral_gain):
+    def __init__(self, target_value, measured_value, proportional_gain, derivative_gain, integral_gain):
         self.target = target_value
         self.measured = measured_value
         self.KP = proportional_gain
@@ -102,16 +117,7 @@ def interpol_fn(Mass_initial, Mass_to_reach, time_duration,num_time_steps, func_
         Mass_dot_t = np.diff(Mass_t)/h ## Function?
     return Mass_t, Mass_dot_t, t
 
-def log_data(time,actual_flow,target_flow,pressure, current_mass, current_gt_mass, desired_Mass, set_voltage, sense_current):
-    """
-    Reads and stores data in the file open in .csv format
-    """
-    
-    # voltage = actual_channel.voltage 
-    # set_pt_voltage = set_point_channel.voltage 
-    # voltage_pressure = pressure_ch.voltage 
-    today = date.today()
-    log.write("{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}\n".format(str(today.strftime("%d/%m/%Y")),str(time),str (actual_flow),str (target_flow),str(pressure),str(current_mass),str(current_gt_mass), str(desired_Mass), str(set_voltage), str(sense_current)))
+
 
 def twosComp(val, bits):
     if (val & (1 << (bits - 1))) != 0:
@@ -220,7 +226,8 @@ if __name__ == '__main__':
     del_t = 0.005
 
     #Storing flow and pressure values for calculating movingaverage
-    flow_values = np.empty(NumberOfRuns+2)
+    flow_values_inf = np.empty(NumberOfRuns+2)
+    flow_values_def = np.empty(NumberOfRuns+2)
     pressure_values = np.empty(NumberOfRuns+2)
     
     # For Sensirion
@@ -252,12 +259,12 @@ if __name__ == '__main__':
     t_start = time.time() + MV_AVG_DEPTH * del_t
     time_spent =0
 
-    set_voltage_inf = 2.3
-    set_voltage_def = 2.3
-
+    supply_pressure = 3 # bar
+    set_voltage_inf = flow_start_voltage_pressure(supply_pressure)
+    
 
     #### ---- Control gains ---- ####
-    controlKP = 0.060
+    controlKP = 0.070
     # controlKP = float(input("Proportional Gain: "))
     controlKD = 0.000
     # controlKD = float(input("Derivative Gain: "))
@@ -273,11 +280,13 @@ if __name__ == '__main__':
             while(True  & (time_val <= TIME_DURATION) & (p_after1 < 250.0) & (Current_mass <= TARGET_MASS)): #&  (avg_flow_value>=0.5)):
                 time_loop_start = time.time()
             	
-                flow_val = ReadSensirion(bus_inf)               
+                flow_val_inf = ReadSensirion(bus_inf) 
+                flow_val_def = ReadSensirion(bus_def)               
                 p_after1 = convert_volt2pressure(adc.ADS1256_GetChannalValue(pressure_channel) * 5.0/0x7fffff) # Full scale output is 0x7fffff for the ADC
 
                 #Moving Average of the measure flow and pressure values
-                flow_values[i] = flow_val
+                flow_values_inf[i] = flow_val_inf
+                flow_values_def[i] = flow_val_def
                 pressure_values[i] = p_after1
 
                 if i < MV_AVG_DEPTH:
@@ -285,7 +294,8 @@ if __name__ == '__main__':
                     # print('Time spent: ', time_spent)
 
                 if i >= MV_AVG_DEPTH:
-                    avg_flow_value = np.mean(flow_values[i-MV_AVG_DEPTH:i])            	
+                    avg_flow_value_inf = np.mean(flow_values_inf[i-MV_AVG_DEPTH:i])  
+                    avg_flow_value_def = np.mean(flow_values_def[i-MV_AVG_DEPTH:i])            	
                     avg_pressure_value = np.mean(pressure_values[i-MV_AVG_DEPTH:i]) 
 
 
@@ -299,13 +309,13 @@ if __name__ == '__main__':
                     
                     targetFlow = convert_kgs2lmin(cubicSpline.getFlow(t))
                     desiredMass = cubicSpline.getMass(t)
-                    cf = ControlFlow(targetFlow, avg_flow_value, controlKP, controlKD, controlKI)
+                    cf = ControlFlow(targetFlow, avg_flow_value_inf, controlKP, controlKD, controlKI)
 
                     set_voltage_inf = cf.contolLaw(set_voltage_inf)
                     dac.DAC8532_Out_Voltage(select_channel_inf, set_voltage_inf)
                     # print("avg flow value: (l/min) ", avg_flow_value)
                     del_t_corrected = time.time() - time_loop_start
-                    Current_mass = Current_mass +  del_t_corrected * convert_lmin2kgs(avg_flow_value)
+                    Current_mass = Current_mass +  del_t_corrected * convert_lmin2kgs(avg_flow_value_inf)
 
 
                     # Current_GT_mass = Current_GT_mass + computeMassDelta(avg_pressure_value,p_before=0.0, r=287.058, t=293.15)
@@ -315,7 +325,7 @@ if __name__ == '__main__':
                     # time_val = time.time()-t_start
                     t= time.time() - t_start - time_spent 
                     time_val = t
-                    log_data(time_val,avg_flow_value,targetFlow, avg_pressure_value, Current_mass, Current_GT_mass, desiredMass, set_voltage_inf, sense_current_inf)
+                    log_data(time_val,avg_flow_value_inf,avg_flow_value_def,targetFlow,avg_pressure_value, Current_mass, Current_GT_mass, desiredMass, set_voltage_inf, sense_current_inf)
                 time_offset = time.time()-time_loop_start
                 # print("Time offset:", time_offset)
                 # Give time for sampling
@@ -328,28 +338,37 @@ if __name__ == '__main__':
             dac.DAC8532_Out_Voltage(0x30, 0)
             cubicSpline = CubicInterpolation(Current_mass,0)
             print("Current mass after inflation:" ,Current_mass)
-            controlKP = 0.050
+            
+            
+
             #Deflation loop
+            controlKP = 0.080
             t_start_def = time.time()
             i = 0
             t = 0
+            pressure_inside_valve = convert_volt2pressure(adc.ADS1256_GetChannalValue(pressure_channel) * 5.0/0x7fffff)/100 # in bar
+            set_voltage_def = flow_start_voltage_pressure(pressure_inside_valve)
+
             while(True  & (p_after1 < 250.0) & (time_val <= 2 * TIME_DURATION)): #& (time_val <= 2 * TIME_DURATION) &  (avg_flow_value>=0.5)):
+                
                 time_loop_start = time.time()
                 
-                flow_val = ReadSensirion(bus_def)               
-                p_after1 = convert_volt2pressure(adc.ADS1256_GetChannalValue(pressure_channel) * 5.0/0x7fffff)
+                flow_val_inf = ReadSensirion(bus_inf) 
+                flow_val_def = ReadSensirion(bus_def)               
+                p_after1 = convert_volt2pressure(adc.ADS1256_GetChannalValue(pressure_channel) * 5.0/0x7fffff) # Full scale output is 0x7fffff for the ADC
 
                 #Moving Average of the measure flow and pressure values
-                flow_values[i] = flow_val
+                flow_values_inf[i] = flow_val_inf
+                flow_values_def[i] = flow_val_def
                 pressure_values[i] = p_after1
 
                 if i < MV_AVG_DEPTH:
                     time_spent = time.time() - t_start_def
-                    # print(time_spent)
                     # print('Time spent: ', time_spent)
 
                 if i >= MV_AVG_DEPTH:
-                    avg_flow_value = np.mean(flow_values[i-MV_AVG_DEPTH:i])             
+                    avg_flow_value_inf = np.mean(flow_values_inf[i-MV_AVG_DEPTH:i])  
+                    avg_flow_value_def = np.mean(flow_values_def[i-MV_AVG_DEPTH:i])             
                     avg_pressure_value = np.mean(pressure_values[i-MV_AVG_DEPTH:i]) 
 
 
@@ -361,16 +380,17 @@ if __name__ == '__main__':
                     # print("time: ", t)                    
                     
                     targetFlow = -convert_kgs2lmin(cubicSpline.getFlow(t))
-                    print("time: ",t)
+                    # print("time: ",t)
                     desiredMass = cubicSpline.getMass(t)
-                    cf = ControlFlow(targetFlow, avg_flow_value, controlKP, controlKD, controlKI)
-
+                    cf = ControlFlow(targetFlow, avg_flow_value_def, controlKP, controlKD, controlKI)
+                    # pressure_diff = supply_pressure - p_after1/100
+                    # set_voltage_def = flow_start_voltage_pressure(pressure_diff)
                     set_voltage_def = cf.contolLaw(set_voltage_def)
                     dac.DAC8532_Out_Voltage(select_channel_def, set_voltage_def)
                     # dac.setVoltage(select_channel_def, convertVolt2DacVal(set_voltage_def))
                     # print("avg flow value: (l/min) ", avg_flow_value)
                     del_t_corrected = time.time() - time_loop_start
-                    Current_mass = Current_mass -  del_t_corrected * convert_lmin2kgs(avg_flow_value)
+                    Current_mass = Current_mass -  del_t_corrected * convert_lmin2kgs(avg_flow_value_def)
 
 
                     # Current_GT_mass = Current_GT_mass + computeMassDelta(avg_pressure_value,p_before=0.0, r=287.058, t=293.15)
@@ -380,8 +400,9 @@ if __name__ == '__main__':
                     # time_val = time.time()-t_start
                     t= time.time() - t_start_def - time_spent 
                     time_val = time.time() - t_start - time_spent
+                    print(time_val)
                     # time_val_log = time.time() - t_start - time_spent
-                    log_data(time_val,-avg_flow_value,-targetFlow, avg_pressure_value, Current_mass, Current_GT_mass, desiredMass, set_voltage_def, sense_current_def)
+                    log_data(time_val,avg_flow_value_inf,-avg_flow_value_def, -targetFlow, avg_pressure_value, Current_mass, Current_GT_mass, desiredMass, set_voltage_def, sense_current_def)
                 time_offset = time.time()-time_loop_start
 
                 if (Current_mass <= 0) :
