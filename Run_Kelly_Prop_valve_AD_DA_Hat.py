@@ -223,7 +223,7 @@ if __name__ == '__main__':
     avg_flow_value = 4
     
     ###### del_t ######
-    del_t = 0.005
+    del_t = 0.04
 
     #Storing flow and pressure values for calculating movingaverage
     flow_values_inf = np.empty(NumberOfRuns+2)
@@ -260,11 +260,11 @@ if __name__ == '__main__':
     time_spent =0
 
     supply_pressure = 3 # bar
-    set_voltage_inf = flow_start_voltage_pressure(supply_pressure)
+    set_voltage_inf = 2.75
     
 
     #### ---- Control gains ---- ####
-    controlKP = 0.070
+    controlKP = 0.055
     # controlKP = float(input("Proportional Gain: "))
     controlKD = 0.000
     # controlKD = float(input("Derivative Gain: "))
@@ -330,25 +330,25 @@ if __name__ == '__main__':
                 # print("Time offset:", time_offset)
                 # Give time for sampling
                 if del_t - time_offset <= 0:
-                    time.sleep(del_t)
+                    time.sleep(0)
                 else:
                     time.sleep(del_t - time_offset)
                 i=i+1
             print("Inflation complete")
             dac.DAC8532_Out_Voltage(0x30, 0)
             cubicSpline = CubicInterpolation(Current_mass,0)
-            print("Current mass after inflation:" ,Current_mass)
+            print("Current mass after inflation: " + str(Current_mass * 1e6) + " mg")
             
             
 
             #Deflation loop
-            controlKP = 0.080
+            controlKP = 0.050
             t_start_def = time.time()
             i = 0
             t = 0
             pressure_inside_valve = convert_volt2pressure(adc.ADS1256_GetChannalValue(pressure_channel) * 5.0/0x7fffff)/100 # in bar
-            set_voltage_def = flow_start_voltage_pressure(pressure_inside_valve)
-
+            # set_voltage_def = flow_start_voltage_pressure(pressure_inside_valve)
+            set_voltage_def = 3.25
             while(True  & (p_after1 < 250.0) & (time_val <= 2 * TIME_DURATION)): #& (time_val <= 2 * TIME_DURATION) &  (avg_flow_value>=0.5)):
                 
                 time_loop_start = time.time()
@@ -400,7 +400,7 @@ if __name__ == '__main__':
                     # time_val = time.time()-t_start
                     t= time.time() - t_start_def - time_spent 
                     time_val = time.time() - t_start - time_spent
-                    print(time_val)
+                    # print(time_val)
                     # time_val_log = time.time() - t_start - time_spent
                     log_data(time_val,avg_flow_value_inf,-avg_flow_value_def, -targetFlow, avg_pressure_value, Current_mass, Current_GT_mass, desiredMass, set_voltage_def, sense_current_def)
                 time_offset = time.time()-time_loop_start
@@ -410,7 +410,7 @@ if __name__ == '__main__':
                 # print("Time offset:", time_offset)
                 # Give time for sampling
                 if del_t - time_offset <= 0:
-                    time.sleep(del_t)
+                    time.sleep(0)
                 else:
                     time.sleep(del_t - time_offset)
                 i=i+1
