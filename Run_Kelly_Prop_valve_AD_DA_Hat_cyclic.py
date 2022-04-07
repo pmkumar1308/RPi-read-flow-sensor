@@ -72,7 +72,6 @@ class CubicInterpolation:
         self.a_2 = (3/(self.completion_time**2))*(Mass_to_reach - Mass_initial)
         self.a_3 = - (2/(self.completion_time**3))*(Mass_to_reach - Mass_initial)
         
-
     def getMass(self,t):
         return self.a_0 + self.a_1 * t + self.a_2 * t**2 + self.a_3 * t**3
 
@@ -119,6 +118,19 @@ def interpol_fn(Mass_initial, Mass_to_reach, time_duration,num_time_steps, func_
         Mass_dot_t = np.diff(Mass_t)/h ## Function?
     return Mass_t, Mass_dot_t, t
 
+class sinosoidalTrajectory:
+    def __init__(self,Mass_initial, Mass_to_reach):
+        self.initial_Mass = Mass_initial
+        self.Final_mass = Mass_to_reach
+        self.completion_time = TIME_DURATION
+        self.amplitude = (Mass_to_reach - Mass_initial)/2
+        self.frequency = 1 / self.completion_time
+
+    def getMass(self,t):
+        return self.amplitude*np.sin(2 * np.pi * self.frequency * t - np.pi/2 ) + (self.initial_Mass + self.Final_mass)/2 #/ self.completion_time
+    
+    def getFlow(self,t):
+        return self.amplitude*np.cos(2 * np.pi * self.frequency * t - np.pi/2) 
 
 
 def twosComp(val, bits):
