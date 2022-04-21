@@ -29,6 +29,7 @@ OFFSET = 0
 CONTROL_OFFSET = 0
 TIME_DURATION = 4 + CONTROL_OFFSET
 CURRENT_DRIVER_SENSE_RES_VALUE = 2.08
+NUM_CYCLES = 2
 
 """The calibrated signal read from the flow sensor is a signed
 INTEGER number (two's complement number). The
@@ -122,7 +123,7 @@ class sinosoidalTrajectory:
     def __init__(self,Mass_initial, Mass_to_reach):
         self.initial_Mass = Mass_initial
         self.Final_mass = Mass_to_reach
-        self.completion_time = TIME_DURATION
+        self.completion_time = 2 * TIME_DURATION
         self.amplitude = (Mass_to_reach - Mass_initial)/2
         self.frequency = 1 / self.completion_time
 
@@ -132,6 +133,12 @@ class sinosoidalTrajectory:
     def getFlow(self,t):
         return self.amplitude*np.cos(2 * np.pi * self.frequency * t - np.pi/2) 
 
+class trajectoryGenerator:
+    def choose(trajectoryName,Mass_initial, Mass_to_reach):
+        if trajectoryName == "cubic":
+            return CubicInterpolation(Mass_initial, Mass_to_reach)
+        if trajectoryName == "sin":
+            return sinosoidalTrajectory(Mass_initial, Mass_to_reach)
 
 def twosComp(val, bits):
     if (val & (1 << (bits - 1))) != 0:
@@ -273,6 +280,7 @@ if __name__ == '__main__':
     dac.DAC8532_Out_Voltage(DAC8532.channel_B, select_value)
     
     # start time of recording data
+    t_absolute_start = time.time()
     t_start = time.time() + MV_AVG_DEPTH * del_t
     time_spent =0
 
@@ -280,6 +288,9 @@ if __name__ == '__main__':
     set_voltage_inf = 2.75
     
 
+    #####-----Define masses-----#####
+    initial_mass = 20e-6
+    final_mass = 60e-6
     #### ---- Control gains ---- ####
     controlKP = 900
     # controlKP = float(input("Proportional Gain: "))
@@ -292,14 +303,16 @@ if __name__ == '__main__':
         with open(file_path, "a") as log: 
             Current_mass = 0
             Current_GT_mass = 0
-            cubicSpline = CubicInterpolation(0, TARGET_MASS)
-            # Inflation Loop
+            # cubicSpline = CubicInterpolation(20e3, 60e3)
+            traj = trajectoryGenerator.choose("sin",0,initial_mass)
+            
             while(True  & (time_val <= TIME_DURATION) & (p_after1 < 250.0) & (Current_mass <= TARGET_MASS)): #&  (avg_flow_value>=0.5)):
                 time_loop_start = time.time()
                 flow_val_inf = ReadSensirion(bus_inf) # 5 ms
                 flow_val_def = 0                          
                 p_after1 = convert_volt2pressure(adc.ADS1256_GetChannalValue(pressure_channel) * 5.0/0x7fffff) # 8 ms Full scale output is 0x7fffff for the ADC
                 # p_after1 = 0
+
                 #Moving Average of the measure flow and pressure values
                 flow_values_inf[i] = flow_val_inf
                 flow_values_def[i] = flow_val_def
@@ -307,20 +320,19 @@ if __name__ == '__main__':
 
                 if i < MV_AVG_DEPTH:
                     time_spent = time.time() - t_start
-                    # print('Time spent: ', time_spent)
-
+                
                 if i >= MV_AVG_DEPTH:
                     
                     avg_flow_value_inf = np.mean(flow_values_inf[i-MV_AVG_DEPTH:i])  
-                    avg_flow_value_def = np.mean(flow_values_def[i-MV_AVG_DEPTH:i])            	
+                    avg_flow_value_def = np.mean(flow_values_def[i-MV_AVG_DEPTH:i])             
                     avg_pressure_value = np.mean(pressure_values[i-MV_AVG_DEPTH:i]) 
 
                     # p_after1 = convert_volt2pressure(adc.ADS1256_GetChannalValue(pressure_channel) * 5.0/0x7fffff) # 8 ms Full scale output is 0x7fffff for the ADC
                     # sense_current_inf = convert_volt2current(adc.ADS1256_GetChannalValue(sense_resistor_channel_inf)  * 5.0/0x7fffff) # 8-9 ms                  
                     sense_current_inf = 0
 
-                    targetFlow = convert_kgs2lmin(cubicSpline.getFlow(t))
-                    desiredMass = cubicSpline.getMass(t)
+                    targetFlow = convert_kgs2lmin(traj.getFlow(t))
+                    desiredMass = traj.getMass(t)
                     cf = ControlFlow(desiredMass,Current_mass, targetFlow,avg_flow_value_inf, controlKP, controlKD, controlKI)                    
                     
                     pressure_diff = supply_pressure - p_after1/100
@@ -331,97 +343,171 @@ if __name__ == '__main__':
                     
                     del_t_corrected = time.time() - time_loop_start
                     Current_mass = Current_mass +  del_t_corrected * convert_lmin2kgs(avg_flow_value_inf)
-                    # print(Current_mass)
+                   
                     Current_GT_mass = computeMassDelta(avg_pressure_value,p_before=0.0, r=287.058, t=293.15)                    
                     t= time.time() - t_start - time_spent 
                     time_val = t
                     log_data(time_val,avg_flow_value_inf,avg_flow_value_def,targetFlow,avg_pressure_value, Current_mass, Current_GT_mass, desiredMass, set_voltage_inf, sense_current_inf)
-    
+
                 time_offset = time.time()-time_loop_start
-                
+                    
                 if del_t - time_offset <= 0:
                     time.sleep(0)
                 else:
                     time.sleep(del_t - time_offset)
                 i=i+1
-            print("Inflation complete")
-            dac.DAC8532_Out_Voltage(0x30, 0)
-            Current_mass = -Current_mass
-            cubicSpline = CubicInterpolation(Current_mass,0)
-            print("Current mass after inflation: " + str(-Current_mass * 1e6) + " mg")
+            cycle = 0
 
-            #Deflation loop
-            t_start_def = time.time()
-            i = 0
-            t = 0
 
-            pressure_inside_valve = convert_volt2pressure(adc.ADS1256_GetChannalValue(pressure_channel) * 5.0/0x7fffff)/100 # in bar
-            set_voltage_def = flow_start_voltage_pressure(pressure_inside_valve)
-            print("The flow start voltage for deflation: ",set_voltage_def)
-            print("The pressure after inflation is: ", pressure_inside_valve)
+            while cycle < NUM_CYCLES:
+            # Cycle between two masses
+                i=0
+                t=0
+                time_val = 0
+                traj = trajectoryGenerator.choose("sin",initial_mass,final_mass)
+                # start time of recording data
+                t_start = time.time() + MV_AVG_DEPTH * del_t
+                time_spent =0
+                p_after1 = 0
+                print("Current mass: ", Current_mass)
+                print("Time: ",time_val)
+                print("pressure", p_after1)
+                print("Target Mass: ", final_mass)
+                Current_mass = 0
+                while(True  & (time_val <= TIME_DURATION) & (p_after1 < 250.0) ): #& (Current_mass <= final_mass) &  (avg_flow_value>=0.5)):
+                    time_loop_start = time.time()
+                    flow_val_inf = ReadSensirion(bus_inf) # 5 ms
+                    flow_val_def = 0                          
+                    p_after1 = convert_volt2pressure(adc.ADS1256_GetChannalValue(pressure_channel) * 5.0/0x7fffff) # 8 ms Full scale output is 0x7fffff for the ADC
+                    # p_after1 = 0
 
-            set_voltage_def = 3.25
-            print("Remaining time for deflation: ",2* TIME_DURATION - time_val)
-            while(True  & (time_val <= 2 * TIME_DURATION)): #& (p_after1 < 250.0) (time_val <= 2 * TIME_DURATION) &  (avg_flow_value>=0.5)):
+                    #Moving Average of the measure flow and pressure values
+                    flow_values_inf[i] = flow_val_inf
+                    flow_values_def[i] = flow_val_def
+                    pressure_values[i] = p_after1
+
+                    if i < MV_AVG_DEPTH:
+                        time_spent = time.time() - t_start
+                    
+                    if i >= MV_AVG_DEPTH:
+                        
+                        avg_flow_value_inf = np.mean(flow_values_inf[i-MV_AVG_DEPTH:i])  
+                        avg_flow_value_def = np.mean(flow_values_def[i-MV_AVG_DEPTH:i])            	
+                        avg_pressure_value = np.mean(pressure_values[i-MV_AVG_DEPTH:i]) 
+
+                        # p_after1 = convert_volt2pressure(adc.ADS1256_GetChannalValue(pressure_channel) * 5.0/0x7fffff) # 8 ms Full scale output is 0x7fffff for the ADC
+                        # sense_current_inf = convert_volt2current(adc.ADS1256_GetChannalValue(sense_resistor_channel_inf)  * 5.0/0x7fffff) # 8-9 ms                  
+                        sense_current_inf = 0
+
+                        targetFlow = convert_kgs2lmin(traj.getFlow(t))
+                        desiredMass = traj.getMass(t)
+                        cf = ControlFlow(desiredMass,Current_mass, targetFlow,avg_flow_value_inf, controlKP, controlKD, controlKI)                    
+                        
+                        pressure_diff = supply_pressure - p_after1/100
+                        base_line_voltage_inf = flow_start_voltage_pressure(pressure_diff)
+                        set_voltage_inf = cf.contolLaw(set_voltage_inf)
+                        # print("Inflation set voltage: ", set_voltage_inf)
+                        dac.DAC8532_Out_Voltage(select_channel_inf, set_voltage_inf) # 3 ms
+                        
+                        del_t_corrected = time.time() - time_loop_start
+                        Current_mass = Current_mass +  del_t_corrected * convert_lmin2kgs(avg_flow_value_inf)
+                       
+                        Current_GT_mass = computeMassDelta(avg_pressure_value,p_before=0.0, r=287.058, t=293.15)                    
+                        t= time.time() - t_start - time_spent 
+                        time_val = t
+                        log_data(time_val,avg_flow_value_inf,avg_flow_value_def,targetFlow,avg_pressure_value, Current_mass, Current_GT_mass, desiredMass, set_voltage_inf, sense_current_inf)
+        
+                    time_offset = time.time()-time_loop_start
+                    
+                    if del_t - time_offset <= 0:
+                        time.sleep(0)
+                    else:
+                        time.sleep(del_t - time_offset)
+                    i=i+1
+                print("Inflation complete")
+                dac.DAC8532_Out_Voltage(0x30, 0)
                 
-                time_loop_start = time.time()
+                #Deflation loop
+                traj = trajectoryGenerator.choose("sin",final_mass,initial_mass)
+                print("Current mass after inflation: " + str(Current_mass * 1e6) + " mg")
+
                 
-                flow_val_inf = 0 
-                flow_val_def = ReadSensirion(bus_def)               
-                p_after1 = convert_volt2pressure(adc.ADS1256_GetChannalValue(pressure_channel) * 5.0/0x7fffff) # Full scale output is 0x7fffff for the ADC
-                # p_after1 = 0
-                #Moving Average of the measure flow and pressure values
-                flow_values_inf[i] = flow_val_inf
-                flow_values_def[i] = flow_val_def
-                pressure_values[i] = p_after1
-              
-                if i < MV_AVG_DEPTH:                    
-                    if i == MV_AVG_DEPTH-1:
-                        # pressure_inside_valve = convert_volt2pressure(adc.ADS1256_GetChannalValue(pressure_channel) * 5.0/0x7fffff)/100 # in bar
-                        # set_voltage_def = flow_start_voltage_pressure(pressure_inside_valve)
-                        print("The flow start voltage for deflation: ",set_voltage_def)
-                        print("The pressure after inflation is: ", pressure_inside_valve)
-                    time_spent = time.time() - t_start_def
+                t_start_def = time.time()
+                i = 0
+                t = 0
 
-                if i >= MV_AVG_DEPTH:
+                pressure_inside_valve = convert_volt2pressure(adc.ADS1256_GetChannalValue(pressure_channel) * 5.0/0x7fffff)/100 # in bar
+                set_voltage_def = flow_start_voltage_pressure(pressure_inside_valve)
+                print("The flow start voltage for deflation: ",set_voltage_def)
+                print("The pressure after inflation is: ", pressure_inside_valve)
 
-                    avg_flow_value_inf = np.mean(flow_values_inf[i-MV_AVG_DEPTH:i])  
-                    avg_flow_value_def = np.mean(flow_values_def[i-MV_AVG_DEPTH:i])             
-                    avg_pressure_value = np.mean(pressure_values[i-MV_AVG_DEPTH:i])
-
-                    # p_after1 = convert_volt2pressure(adc.ADS1256_GetChannalValue(pressure_channel) * 5.0/0x7fffff) # Full scale output is 0x7fffff for the ADC
-                    # sense_current_def = convert_volt2current(adc.ADS1256_GetChannalValue(sense_resistor_channel_def) * 5.0/0x7fffff)
-                    sense_current_def = 0        
+                set_voltage_def = 3.25
+                print("Remaining time for deflation: ",2* TIME_DURATION - time_val)
+                while(True  & (time_val <= 2 * TIME_DURATION)): #& (p_after1 < 250.0) (time_val <= 2 * TIME_DURATION) &  (avg_flow_value>=0.5)):
+                    # print(time_val)
+                    time_loop_start = time.time()
                     
-                    targetFlow = convert_kgs2lmin(cubicSpline.getFlow(t))
-                    desiredMass = cubicSpline.getMass(t)
-                    # print(desiredMass)
-                    cf = ControlFlow(desiredMass,Current_mass,targetFlow,avg_flow_value_def, controlKP, controlKD, controlKI)   
+                    flow_val_inf = 0 
+                    flow_val_def = ReadSensirion(bus_def)               
+                    p_after1 = convert_volt2pressure(adc.ADS1256_GetChannalValue(pressure_channel) * 5.0/0x7fffff) # Full scale output is 0x7fffff for the ADC
+                    # p_after1 = 0
+                    #Moving Average of the measure flow and pressure values
+                    flow_values_inf[i] = flow_val_inf
+                    flow_values_def[i] = flow_val_def
+                    pressure_values[i] = p_after1
+                  
+                    if i < MV_AVG_DEPTH:                    
+                        if i == MV_AVG_DEPTH-1:
+                            # pressure_inside_valve = convert_volt2pressure(adc.ADS1256_GetChannalValue(pressure_channel) * 5.0/0x7fffff)/100 # in bar
+                            # set_voltage_def = flow_start_voltage_pressure(pressure_inside_valve)
+                            print("The flow start voltage for deflation: ",set_voltage_def)
+                            print("The pressure after inflation is: ", pressure_inside_valve)
+                        time_spent = time.time() - t_start_def
 
-                    set_voltage_def = cf.contolLaw(set_voltage_def)
-                    dac.DAC8532_Out_Voltage(select_channel_def, set_voltage_def)
-                    
-                    del_t_corrected = time.time() - time_loop_start   
-                    Current_mass = Current_mass +  del_t_corrected * convert_lmin2kgs(avg_flow_value_def)
-                    # print(Current_mass)
-                    Current_GT_mass = computeMassDelta(avg_pressure_value,p_before=0.0, r=287.058, t=293.15)
-                    
-                    t= time.time() - t_start_def - time_spent 
-                    time_val = time.time() - t_start - time_spent
-                    
-                    log_data(time_val,avg_flow_value_inf,-avg_flow_value_def, -targetFlow, avg_pressure_value, -Current_mass, Current_GT_mass, -desiredMass, set_voltage_def, sense_current_def)
-                time_offset = time.time()-time_loop_start
+                    if i >= MV_AVG_DEPTH:
 
-            
-                # Give time for sampling
-                if del_t - time_offset <= 0:
-                    time.sleep(0)
-                else:
-                    time.sleep(del_t - time_offset)
-                i=i+1
-            print("Deflation complete")
+                        avg_flow_value_inf = np.mean(flow_values_inf[i-MV_AVG_DEPTH:i])  
+                        avg_flow_value_def = np.mean(flow_values_def[i-MV_AVG_DEPTH:i])             
+                        avg_pressure_value = np.mean(pressure_values[i-MV_AVG_DEPTH:i])
+
+                        # p_after1 = convert_volt2pressure(adc.ADS1256_GetChannalValue(pressure_channel) * 5.0/0x7fffff) # Full scale output is 0x7fffff for the ADC
+                        # sense_current_def = convert_volt2current(adc.ADS1256_GetChannalValue(sense_resistor_channel_def) * 5.0/0x7fffff)
+                        sense_current_def = 0        
+                        
+                        targetFlow = convert_kgs2lmin(traj.getFlow(t))
+                        desiredMass = traj.getMass(t)
+                        # print(desiredMass)
+                        cf = ControlFlow(desiredMass,-Current_mass,targetFlow,avg_flow_value_def, controlKP, controlKD, controlKI)   
+
+                        pressure_diff = supply_pressure - p_after1/100
+                        base_line_voltage_inf = flow_start_voltage_pressure(pressure_diff)
+                        set_voltage_def = cf.contolLaw(set_voltage_def)
+                        dac.DAC8532_Out_Voltage(select_channel_def, set_voltage_def)
+                        
+                        del_t_corrected = time.time() - time_loop_start   
+                        Current_mass = Current_mass +  del_t_corrected * convert_lmin2kgs(avg_flow_value_def)
+                        # print(Current_mass)
+                        Current_GT_mass = computeMassDelta(avg_pressure_value,p_before=0.0, r=287.058, t=293.15)
+                        
+                        t= time.time() - t_start_def - time_spent 
+                        time_val = time.time() - t_start - time_spent
+                        
+                        log_data(time_val,avg_flow_value_inf,-avg_flow_value_def, targetFlow, avg_pressure_value, -Current_mass, Current_GT_mass, desiredMass, set_voltage_def, sense_current_def)
+                    time_offset = time.time()-time_loop_start
+
+                
+                    # Give time for sampling
+                    if del_t - time_offset <= 0:
+                        time.sleep(0)
+                    else:
+                        time.sleep(del_t - time_offset)
+                    i=i+1
+                # time.sleep(1)
+                cycle += 1
+                print("Cycle(s) completed: ",cycle)
+            print("All cycles complete")
             print("Data recorded")
-            print("Time elapsed: ", time_val)
+            print("Time elapsed: ", NUM_CYCLES*time_val)
             dac.DAC8532_Out_Voltage(0x30, 0)
             dac.DAC8532_Out_Voltage(0x34, 0)
             GPIO.cleanup()
