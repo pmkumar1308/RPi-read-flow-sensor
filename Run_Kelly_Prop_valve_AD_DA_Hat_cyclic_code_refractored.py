@@ -36,7 +36,7 @@ OFFSET = 0
 CONTROL_OFFSET = 0
 TIME_DURATION = 4 + CONTROL_OFFSET
 CURRENT_DRIVER_SENSE_RES_VALUE = 2.08
-NUM_CYCLES = 2
+NUM_CYCLES = 10
 
 if __name__ == '__main__':
 
@@ -49,7 +49,7 @@ if __name__ == '__main__':
         'avg_flow_value' : 4  ,      
 
         ###### del_t for sampling ######
-        'del_t' : 0.020,# s
+        'del_t' : 0.010,# s
        
         
         # For Sensirion I2C bus
@@ -78,7 +78,7 @@ if __name__ == '__main__':
         # Setting baseline control voltage
         'supply_pressure' : 3, # bar
         'set_voltage_inf' : 2.75,# V
-        
+        'set_voltage_def' : 0, # V
 
         #####-----Define masses-----#####
         'initialMass' : 0,
@@ -117,8 +117,20 @@ if __name__ == '__main__':
     try:
         with open(file_path, "a") as log:     
             cycle = 0
+            initial_pressure = lib.convert_volt2pressure(param_dict['adc'].ADS1256_GetChannalValue(param_dict['pressure_channel']) * 5.0/0x7fffff)
+            while True:
+                if initial_pressure > 2:
+                    #Checking the initial pressure to make sure the tube is empty:
+                    initial_pressure = lib.convert_volt2pressure(param_dict['adc'].ADS1256_GetChannalValue(param_dict['pressure_channel']) * 5.0/0x7fffff)
+                    print(".........Deflating the tube, initial pressure inside the tube: ", initial_pressure)                    
+                    param_dict['dac'].DAC8532_Out_Voltage(DAC8532.channel_B, 5)
+                else:
+                    param_dict['dac'].DAC8532_Out_Voltage(DAC8532.channel_B, 0)
+                    break  
 
             # Increasing mass to initial mass i.e from 0 to initialMass
+            param_dict['i']=0
+            param_dict['t']=0
             param_dict = lib.runKelly(param_dict, log, mode="inflation")
 
             print("Current mass after inflation to initial mass: " + str(param_dict['CurrentMass'] * 1e6) + " mg")
@@ -126,7 +138,7 @@ if __name__ == '__main__':
             ## CYCLES START ##
             while cycle < NUM_CYCLES:
             # Cycle between two masses
-                time.sleep(0.2)
+                
                 
                 ############################ INFLATION ##########################
                 param_dict['i']=0
@@ -134,11 +146,14 @@ if __name__ == '__main__':
                 param_dict['time_val'] = 0
                 param_dict['initialMass'] = 20e-6
                 param_dict['finalMass'] = 60e-6
-                
+                param_dict['set_voltage_inf'] = 2.75
+                param_dict['set_voltage_def'] = 0
+
                 # start time of recording data
                 param_dict['t_start'] = time.time() + MV_AVG_DEPTH * param_dict['del_t']                
                 param_dict['time_spent'] =0
 
+                print("Inflation started")
                 print("Current mass: ", param_dict['CurrentMass'])
                 print("Time: ",param_dict['time_val'])
                 print("pressure", param_dict['p_after1'])
@@ -147,17 +162,22 @@ if __name__ == '__main__':
                 # Control valve for inflation
                 param_dict = lib.runKelly(param_dict, log, mode="inflation")
 
+                print("Inflation complete")
                 print("Current mass after inflation: " + str(param_dict['CurrentMass'] * 1e6) + " mg")
 
-                time.sleep(0.2)
+                
                 print(param_dict['i'])
 
                 ############################# DEFLATION ###########################
+                print("Deflation started")
                 param_dict['i']=0
                 param_dict['t']=0
                 param_dict['t_start'] = time.time()               
-                param_dict['initialMass'] = 60e-6
-                param_dict['finalMass'] = 20e-6
+                param_dict['initialMass'] = 20e-6
+                param_dict['finalMass'] = 60e-6
+
+                param_dict['set_voltage_inf'] = 0
+                param_dict['set_voltage_def'] = 3.25
 
                 pressure_inside_valve = lib.convert_volt2pressure(param_dict['adc'].ADS1256_GetChannalValue(param_dict['pressure_channel']) * 5.0/0x7fffff)/100 # in bar
                 set_voltage_def = lib.flow_start_voltage_pressure(pressure_inside_valve)
@@ -165,15 +185,15 @@ if __name__ == '__main__':
                 print("The flow start voltage for deflation: ",set_voltage_def)
                 print("The pressure after inflation is: ", pressure_inside_valve)
 
-                param_dict['set_voltage_def'] = 3.25
                 print("Time val: ", param_dict['time_val'])
-                print("Remaining time for deflation: ",2* TIME_DURATION - param_dict['time_val'])
+                print("Remaining time for deflation: ",2 * TIME_DURATION - param_dict['time_val'])
                 
                 # Control valve for deflation
                 param_dict = lib.runKelly(param_dict, log, mode="deflation")
 
                 cycle += 1
                 print("Deflation complete")
+                print("Current mass after deflation: " + str(param_dict['CurrentMass'] * 1e6) + " mg")
                 print("Cycle(s) completed: ",cycle)
 
             ############################### END OF CYCLNG ##########################

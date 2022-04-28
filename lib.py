@@ -39,7 +39,9 @@ scale factor)."""
 
 
 
-def log_data(log,time,actual_flow, target_flow,pressure, current_mass, current_gt_mass, desired_Mass, set_voltage, sense_current):
+def log_data(log,time,actual_flow, target_flow,pressure, 
+             current_mass, current_gt_mass, desired_Mass, 
+             set_voltage_inflation, sense_current, set_voltage_deflation):
     """
     Reads and stores data in the file open in .csv format
     """
@@ -48,7 +50,10 @@ def log_data(log,time,actual_flow, target_flow,pressure, current_mass, current_g
     # set_pt_voltage = set_point_channel.voltage 
     # voltage_pressure = pressure_ch.voltage 
     today = date.today()
-    log.write("{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}\n".format(str(today.strftime("%d/%m/%Y")),str(time),str(actual_flow),str (target_flow),str(pressure),str(current_mass),str(current_gt_mass), str(desired_Mass), str(set_voltage), str(sense_current)))
+    log.write("{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}\n".format(str(today.strftime("%d/%m/%Y")),
+        str(time),str(actual_flow),str (target_flow),
+        str(pressure),str(current_mass),str(current_gt_mass), 
+        str(desired_Mass), str(set_voltage_inflation), str(sense_current), str(set_voltage_deflation)))
 
 def convertVolt2DacVal(volt_val):
     """
@@ -221,9 +226,6 @@ def ReadSensirion(device_bus):
     t2 = time.time()
     read_value = device_bus.read_i2c_block_data(DEVICE_ADDR,0xF1,2) # 5 ms TODO: Make it faster # measurement triggering command 0xF1 or hF1
     t3 = time.time()
-    # print("Time spent reading from sensirion: ", t3-t2)
-    # checkSum = read_value[2]
-    # checkSumError = checkCrc(read_value,checkSum)
     read_value = read_value[0]<<8 | read_value[1]
 
     flow_value = twosComp(read_value,16) #getting the twos complement
@@ -240,12 +242,12 @@ def runKelly(params, log, mode):
     if mode == 'inflation':
         i = params['i']
         traj = trajectoryGenerator.choose(params['trajType'],params['initialMass'],params['finalMass'])            
-
+        print("Final Mass for inflation: ",params['finalMass'])
         while(True  & (params['time_val'] <= TIME_DURATION) & (params['p_after1'] < 250.0) & (params['CurrentMass'] <= params['finalMass'] )): #&  (avg_flow_value>=0.5)):
             time_loop_start = time.time()
             flow_val = ReadSensirion(params['bus_inf']) # 5 ms                         
             params['p_after1'] = convert_volt2pressure(params['adc'].ADS1256_GetChannalValue(params['pressure_channel']) * 5.0/0x7fffff) # 8 ms Full scale output is 0x7fffff for the ADC
-           
+            
             #Moving Average of the measure flow and pressure values
             params['flow_values'][i] = flow_val                
             params['pressure_values'][i] = params['p_after1']
@@ -261,7 +263,7 @@ def runKelly(params, log, mode):
 
                 targetFlow = convert_kgs2lmin(traj.getFlow(params['t']))
                 desiredMass = traj.getMass(params['t'])
-                print(params['t'])
+                
                 cf = ControlFlow(desiredMass,params['CurrentMass'], targetFlow,avgFlowValue, params['controlKP'], params['controlKD'], params['controlKI'])                    
                 
                 pressure_diff = params['supply_pressure'] - params['p_after1']/100
@@ -277,7 +279,13 @@ def runKelly(params, log, mode):
                 params['time_val'] = params['t']
                 
                 params['time_log']  =time.time() - params['t_absolute_start'] - params['time_spent']
-                log_data(log,params['time_log'] ,avgFlowValue,targetFlow,avgPressureValue, params['CurrentMass'], params['Current_GT_mass'], desiredMass, params['set_voltage_inf'], sense_current_inf)
+                
+                log_data(log,params['time_log'] ,avgFlowValue,targetFlow,
+                    avgPressureValue, params['CurrentMass'], params['Current_GT_mass'], 
+                    desiredMass, params['set_voltage_inf'],sense_current_inf, params['set_voltage_def'])
+
+                if params['CurrentMass'] > params['finalMass']:
+                    break
 
             timeOffset = time.time()-time_loop_start
                 
@@ -289,6 +297,7 @@ def runKelly(params, log, mode):
 
     if mode == 'deflation':
         traj = trajectoryGenerator.choose(params['trajType'],params['finalMass'],params['initialMass'])
+        # print("Final Mass for deflation: ",params['initialMass'])
         i = params['i']
 
         while(True  & (params['time_val'] <= 2 * TIME_DURATION)): #&  (avg_flow_value>=0.5)):
@@ -312,6 +321,7 @@ def runKelly(params, log, mode):
 
                 targetFlow = convert_kgs2lmin(traj.getFlow(params['t']))
                 desiredMass = traj.getMass(params['t'])
+                # print("Desired Mass during deflation: ", desiredMass)
                 cf = ControlFlow(desiredMass, -params['CurrentMass'], targetFlow,avgFlowValue, params['controlKP'], params['controlKD'], params['controlKI'])                    
                 
                 pressure_diff = params['supply_pressure'] - params['p_after1']/100
@@ -326,8 +336,15 @@ def runKelly(params, log, mode):
                 params['t']= time.time() - params['t_start'] - params['time_spent'] 
                 params['time_val'] = params['t']
                 params['time_log'] = time.time() - params['t_absolute_start'] - params['time_spent']
-                log_data(log,params['time_log'],-avgFlowValue,targetFlow,avgPressureValue, params['CurrentMass'], params['Current_GT_mass'], desiredMass, params['set_voltage_def'], sense_current_def)
+                log_data(log,params['time_log'],-avgFlowValue,targetFlow,
+                    avgPressureValue,params['CurrentMass'], params['Current_GT_mass'], 
+                    desiredMass, params['set_voltage_inf'], sense_current_def, params['set_voltage_def'])
 
+                if params['CurrentMass'] < params['initialMass']:
+                    break
+
+            # print("Current Mass after deflation: ",params['CurrentMass'])
+        
             timeOffset = time.time()-time_loop_start
                 
             if params['del_t'] - timeOffset <= 0:
