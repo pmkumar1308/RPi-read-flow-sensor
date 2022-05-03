@@ -29,7 +29,7 @@ OFFSET = 0
 CONTROL_OFFSET = 0
 TIME_DURATION = 4 + CONTROL_OFFSET
 CURRENT_DRIVER_SENSE_RES_VALUE = 2.08
-NUM_CYCLES = 2
+
 
 """The calibrated signal read from the flow sensor is a signed
 INTEGER number (two's complement number). The
@@ -98,7 +98,10 @@ class ControlFlow:
     def contolLaw(self, controlVoltage):
         self.mass_error = self.target_mass - self.integrated_mass
         self.flow_error = self.target_flow - self.measured_flow
+        # if mode == 'inflation':
         controlVoltage = controlVoltage + self.mass_error * self.KP + self.flow_error * self.KD #self.sum_error * self.KI
+        # if mode == 'deflation':
+
         controlVoltage = max(min(MAX_SET_VALUE, controlVoltage), MIN_SET_VALUE)
         # self.prev_error = error
         # self.sum_error = self.sum_error + error
@@ -138,8 +141,10 @@ class sinosoidalTrajectory:
 class trajectoryGenerator:
     def choose(trajectoryName,mass_initial, mass_to_reach):
         if trajectoryName == "cubic":
+            print("cubic trajectory")
             return CubicInterpolation(mass_initial, mass_to_reach)
         if trajectoryName == "sin":
+            print("Using sinosoidal trajectory")
             return sinosoidalTrajectory(mass_initial, mass_to_reach)
 
 def twosComp(val, bits):
@@ -243,11 +248,15 @@ def runKelly(params, log, mode):
         i = params['i']
         traj = trajectoryGenerator.choose(params['trajType'],params['initialMass'],params['finalMass'])            
         print("Final Mass for inflation: ",params['finalMass'])
-        while(True  & (params['time_val'] <= TIME_DURATION) & (params['p_after1'] < 250.0) & (params['CurrentMass'] <= params['finalMass'] )): #&  (avg_flow_value>=0.5)):
+        while(True  & (params['t'] <= TIME_DURATION) & (params['p_after1'] < 250.0) & (params['CurrentMass'] <= params['finalMass'] )): #&  (avg_flow_value>=0.5)):
             time_loop_start = time.time()
             flow_val = ReadSensirion(params['bus_inf']) # 5 ms                         
             params['p_after1'] = convert_volt2pressure(params['adc'].ADS1256_GetChannalValue(params['pressure_channel']) * 5.0/0x7fffff) # 8 ms Full scale output is 0x7fffff for the ADC
             
+            if params['p_after1'] > 200:
+                print("Pressure exceeded, stopping....")
+                break
+
             #Moving Average of the measure flow and pressure values
             params['flow_values'][i] = flow_val                
             params['pressure_values'][i] = params['p_after1']
@@ -263,6 +272,7 @@ def runKelly(params, log, mode):
 
                 targetFlow = convert_kgs2lmin(traj.getFlow(params['t']))
                 desiredMass = traj.getMass(params['t'])
+                # print("Desired Mass during inflation: {} at time {}".format(desiredMass,params['t']))
                 
                 cf = ControlFlow(desiredMass,params['CurrentMass'], targetFlow,avgFlowValue, params['controlKP'], params['controlKD'], params['controlKI'])                    
                 
@@ -297,14 +307,18 @@ def runKelly(params, log, mode):
 
     if mode == 'deflation':
         traj = trajectoryGenerator.choose(params['trajType'],params['finalMass'],params['initialMass'])
-        # print("Final Mass for deflation: ",params['initialMass'])
+        print('Cycle : ')
+        print("Final Mass for deflation: ",params['initialMass'])
         i = params['i']
 
-        while(True  & (params['time_val'] <= 2 * TIME_DURATION)): #&  (avg_flow_value>=0.5)):
+        while(True  & (params['t'] <=  TIME_DURATION)): #&  (avg_flow_value>=0.5)):
             time_loop_start = time.time()
             flow_val = ReadSensirion(params['bus_def']) # 5 ms                         
             params['p_after1'] = convert_volt2pressure(params['adc'].ADS1256_GetChannalValue(params['pressure_channel']) * 5.0/0x7fffff) # 8 ms Full scale output is 0x7fffff for the ADC
             
+            if params['p_after1'] > 200:
+                print("Pressure exceeded, stopping....")
+                break
 
             #Moving Average of the measure flow and pressure values
             params['flow_values'][i] = flow_val                
@@ -316,14 +330,16 @@ def runKelly(params, log, mode):
             if i >= MV_AVG_DEPTH:                    
                 avgFlowValue = np.mean(params['flow_values'][i-MV_AVG_DEPTH:i])               
                 avgPressureValue = np.mean(params['pressure_values'][i-MV_AVG_DEPTH:i]) 
-              
+                
                 sense_current_def = 0
 
                 targetFlow = convert_kgs2lmin(traj.getFlow(params['t']))
                 desiredMass = traj.getMass(params['t'])
-                # print("Desired Mass during deflation: ", desiredMass)
-                cf = ControlFlow(desiredMass, -params['CurrentMass'], targetFlow,avgFlowValue, params['controlKP'], params['controlKD'], params['controlKI'])                    
+                # print("Desired Mass during deflation: {} at time {}".format(desiredMass,params['t']))
+                print("Desired Mass during deflation: ", desiredMass)
+                cf = ControlFlow(params['CurrentMass'],desiredMass,targetFlow,avgFlowValue, params['controlKP'], params['controlKD'], params['controlKI'])                    
                 
+                print("Current Mass during deflation: ", params['CurrentMass'])
                 pressure_diff = params['supply_pressure'] - params['p_after1']/100
                 params['set_voltage_def'] = cf.contolLaw(params['set_voltage_def'])
                
@@ -340,8 +356,8 @@ def runKelly(params, log, mode):
                     avgPressureValue,params['CurrentMass'], params['Current_GT_mass'], 
                     desiredMass, params['set_voltage_inf'], sense_current_def, params['set_voltage_def'])
 
-                if params['CurrentMass'] < params['initialMass']:
-                    break
+                # if params['CurrentMass'] < params['initialMass']:
+                    # break
 
             # print("Current Mass after deflation: ",params['CurrentMass'])
         

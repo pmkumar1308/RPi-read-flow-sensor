@@ -36,7 +36,7 @@ OFFSET = 0
 CONTROL_OFFSET = 0
 TIME_DURATION = 4 + CONTROL_OFFSET
 CURRENT_DRIVER_SENSE_RES_VALUE = 2.08
-NUM_CYCLES = 10
+NUM_CYCLES = 2
 
 if __name__ == '__main__':
 
@@ -49,7 +49,7 @@ if __name__ == '__main__':
         'avg_flow_value' : 4  ,      
 
         ###### del_t for sampling ######
-        'del_t' : 0.010,# s
+        'del_t' : 0.025,# s
        
         
         # For Sensirion I2C bus
@@ -77,7 +77,7 @@ if __name__ == '__main__':
 
         # Setting baseline control voltage
         'supply_pressure' : 3, # bar
-        'set_voltage_inf' : 2.75,# V
+        'set_voltage_inf' : 2.5,# V
         'set_voltage_def' : 0, # V
 
         #####-----Define masses-----#####
@@ -85,7 +85,7 @@ if __name__ == '__main__':
         'finalMass' : 20e-6, # mg
 
         #### ---- Control gains ---- ####
-        'controlKP' : 900,
+        'controlKP' : 1100,
         # controlKP = float(input("Proportional Gain: "))
         'controlKD' : 0.000,
         # controlKD = float(input("Derivative Gain: "))
@@ -146,28 +146,30 @@ if __name__ == '__main__':
                 param_dict['time_val'] = 0
                 param_dict['initialMass'] = 20e-6
                 param_dict['finalMass'] = 60e-6
-                param_dict['set_voltage_inf'] = 2.75
+                param_dict['set_voltage_inf'] = 2.85
                 param_dict['set_voltage_def'] = 0
+                param_dict['cycle'] = cycle
 
                 # start time of recording data
                 param_dict['t_start'] = time.time() + MV_AVG_DEPTH * param_dict['del_t']                
                 param_dict['time_spent'] =0
 
                 print("Inflation started")
-                print("Current mass: ", param_dict['CurrentMass'])
-                print("Time: ",param_dict['time_val'])
-                print("pressure", param_dict['p_after1'])
-                print("Target Mass: ", param_dict['finalMass'])
+                # print("Current mass: ", param_dict['CurrentMass'])
+                # print("Time: ",param_dict['time_val'])
+                # print("pressure", param_dict['p_after1'])
+                # print("Target Mass: ", param_dict['finalMass'])
                 
                 # Control valve for inflation
                 param_dict = lib.runKelly(param_dict, log, mode="inflation")
 
                 print("Inflation complete")
+                param_dict['dac'].DAC8532_Out_Voltage(DAC8532.channel_A, 0)
                 print("Current mass after inflation: " + str(param_dict['CurrentMass'] * 1e6) + " mg")
 
                 
                 print(param_dict['i'])
-
+                
                 ############################# DEFLATION ###########################
                 print("Deflation started")
                 param_dict['i']=0
@@ -175,6 +177,7 @@ if __name__ == '__main__':
                 param_dict['t_start'] = time.time()               
                 param_dict['initialMass'] = 20e-6
                 param_dict['finalMass'] = 60e-6
+                param_dict['cycle'] = cycle
 
                 param_dict['set_voltage_inf'] = 0
                 param_dict['set_voltage_def'] = 3.25
@@ -182,17 +185,18 @@ if __name__ == '__main__':
                 pressure_inside_valve = lib.convert_volt2pressure(param_dict['adc'].ADS1256_GetChannalValue(param_dict['pressure_channel']) * 5.0/0x7fffff)/100 # in bar
                 set_voltage_def = lib.flow_start_voltage_pressure(pressure_inside_valve)
                 
-                print("The flow start voltage for deflation: ",set_voltage_def)
-                print("The pressure after inflation is: ", pressure_inside_valve)
+                # print("The flow start voltage for deflation: ",set_voltage_def)
+                # print("The pressure after inflation is: ", pressure_inside_valve)
 
-                print("Time val: ", param_dict['time_val'])
-                print("Remaining time for deflation: ",2 * TIME_DURATION - param_dict['time_val'])
+                # print("Time val: ", param_dict['time_val'])
+                # print("Remaining time for deflation: ",2 * TIME_DURATION - param_dict['time_val'])
                 
                 # Control valve for deflation
                 param_dict = lib.runKelly(param_dict, log, mode="deflation")
 
                 cycle += 1
                 print("Deflation complete")
+                param_dict['dac'].DAC8532_Out_Voltage(DAC8532.channel_B, 0)
                 print("Current mass after deflation: " + str(param_dict['CurrentMass'] * 1e6) + " mg")
                 print("Cycle(s) completed: ",cycle)
 
