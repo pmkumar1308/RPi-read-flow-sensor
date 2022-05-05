@@ -27,7 +27,7 @@ MAX_SET_VALUE = 5 #Maximum voltage to be set
 MIN_SET_VALUE = 0 #Minimum voltage to be set
 OFFSET = 0
 CONTROL_OFFSET = 0
-TIME_DURATION = 4 + CONTROL_OFFSET
+TIME_DURATION = 6 + CONTROL_OFFSET
 CURRENT_DRIVER_SENSE_RES_VALUE = 2.08
 
 
@@ -294,8 +294,8 @@ def runKelly(params, log, mode):
                     avgPressureValue, params['CurrentMass'], params['Current_GT_mass'], 
                     desiredMass, params['set_voltage_inf'],sense_current_inf, params['set_voltage_def'])
 
-                if params['CurrentMass'] > params['finalMass']:
-                    break
+                # if params['CurrentMass'] > params['finalMass']:
+                #     break
 
             timeOffset = time.time()-time_loop_start
                 

@@ -34,9 +34,9 @@ MAX_SET_VALUE = 5 #Maximum voltage to be set
 MIN_SET_VALUE = 0 #Minimum voltage to be set
 OFFSET = 0
 CONTROL_OFFSET = 0
-TIME_DURATION = 4 + CONTROL_OFFSET
+# TIME_DURATION = 2 + CONTROL_OFFSET
 CURRENT_DRIVER_SENSE_RES_VALUE = 2.08
-NUM_CYCLES = 2
+NUM_CYCLES = 20
 
 if __name__ == '__main__':
 
@@ -49,7 +49,7 @@ if __name__ == '__main__':
         'avg_flow_value' : 4  ,      
 
         ###### del_t for sampling ######
-        'del_t' : 0.025,# s
+        'del_t' : 0.028,# s
        
         
         # For Sensirion I2C bus
@@ -145,7 +145,7 @@ if __name__ == '__main__':
                 param_dict['t']=0
                 param_dict['time_val'] = 0
                 param_dict['initialMass'] = 20e-6
-                param_dict['finalMass'] = 60e-6
+                param_dict['finalMass'] = 80e-6
                 param_dict['set_voltage_inf'] = 2.85
                 param_dict['set_voltage_def'] = 0
                 param_dict['cycle'] = cycle
@@ -176,11 +176,11 @@ if __name__ == '__main__':
                 param_dict['t']=0
                 param_dict['t_start'] = time.time()               
                 param_dict['initialMass'] = 20e-6
-                param_dict['finalMass'] = 60e-6
+                param_dict['finalMass'] = 80e-6
                 param_dict['cycle'] = cycle
 
                 param_dict['set_voltage_inf'] = 0
-                param_dict['set_voltage_def'] = 3.25
+                param_dict['set_voltage_def'] = 3.75
 
                 pressure_inside_valve = lib.convert_volt2pressure(param_dict['adc'].ADS1256_GetChannalValue(param_dict['pressure_channel']) * 5.0/0x7fffff)/100 # in bar
                 set_voltage_def = lib.flow_start_voltage_pressure(pressure_inside_valve)
