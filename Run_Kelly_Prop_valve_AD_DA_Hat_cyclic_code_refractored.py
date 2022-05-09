@@ -36,7 +36,7 @@ OFFSET = 0
 CONTROL_OFFSET = 0
 # TIME_DURATION = 2 + CONTROL_OFFSET
 CURRENT_DRIVER_SENSE_RES_VALUE = 2.08
-NUM_CYCLES = 20
+NUM_CYCLES = 5
 
 if __name__ == '__main__':
 
@@ -49,7 +49,7 @@ if __name__ == '__main__':
         'avg_flow_value' : 4  ,      
 
         ###### del_t for sampling ######
-        'del_t' : 0.028,# s
+        'del_t' : 0.035,# s
        
         
         # For Sensirion I2C bus
@@ -82,14 +82,14 @@ if __name__ == '__main__':
 
         #####-----Define masses-----#####
         'initialMass' : 0,
-        'finalMass' : 20e-6, # mg
+        'finalMass' : 10e-6, # mg
 
         #### ---- Control gains ---- ####
         'controlKP' : 1100,
         # controlKP = float(input("Proportional Gain: "))
-        'controlKD' : 0.000,
+        'controlKD' : 500,
         # controlKD = float(input("Derivative Gain: "))
-        'controlKI' : 0.00,
+        'controlKI' : 300,
         # controlKI = float(input("Integral Gain: "))
         
         # Initialising time for the computation of the trajectory
@@ -119,7 +119,7 @@ if __name__ == '__main__':
             cycle = 0
             initial_pressure = lib.convert_volt2pressure(param_dict['adc'].ADS1256_GetChannalValue(param_dict['pressure_channel']) * 5.0/0x7fffff)
             while True:
-                if initial_pressure > 2:
+                if initial_pressure > 10:
                     #Checking the initial pressure to make sure the tube is empty:
                     initial_pressure = lib.convert_volt2pressure(param_dict['adc'].ADS1256_GetChannalValue(param_dict['pressure_channel']) * 5.0/0x7fffff)
                     print(".........Deflating the tube, initial pressure inside the tube: ", initial_pressure)                    
@@ -131,6 +131,7 @@ if __name__ == '__main__':
             # Increasing mass to initial mass i.e from 0 to initialMass
             param_dict['i']=0
             param_dict['t']=0
+            param_dict['t_absolute_start'] = time.time()        
             param_dict = lib.runKelly(param_dict, log, mode="inflation")
 
             print("Current mass after inflation to initial mass: " + str(param_dict['CurrentMass'] * 1e6) + " mg")
@@ -144,15 +145,12 @@ if __name__ == '__main__':
                 param_dict['i']=0
                 param_dict['t']=0
                 param_dict['time_val'] = 0
-                param_dict['initialMass'] = 20e-6
-                param_dict['finalMass'] = 80e-6
+                param_dict['initialMass'] = 10e-6
+                param_dict['finalMass'] = 35e-6
                 param_dict['set_voltage_inf'] = 2.85
                 param_dict['set_voltage_def'] = 0
                 param_dict['cycle'] = cycle
 
-                # start time of recording data
-                param_dict['t_start'] = time.time() + MV_AVG_DEPTH * param_dict['del_t']                
-                param_dict['time_spent'] =0
 
                 print("Inflation started")
                 # print("Current mass: ", param_dict['CurrentMass'])
@@ -175,8 +173,8 @@ if __name__ == '__main__':
                 param_dict['i']=0
                 param_dict['t']=0
                 param_dict['t_start'] = time.time()               
-                param_dict['initialMass'] = 20e-6
-                param_dict['finalMass'] = 80e-6
+                param_dict['initialMass'] = 10e-6
+                param_dict['finalMass'] = 35e-6
                 param_dict['cycle'] = cycle
 
                 param_dict['set_voltage_inf'] = 0

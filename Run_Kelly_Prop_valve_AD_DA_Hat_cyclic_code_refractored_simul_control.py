@@ -176,8 +176,7 @@ if __name__ == '__main__':
                 ############################# DEFLATION ###########################
                 print("Deflation started")
                 param_dict['i']=0
-                param_dict['t']=0
-                param_dict['t_start'] = time.time()               
+                param_dict['t']=0              
                 param_dict['initialMass'] = 80e-6
                 param_dict['finalMass'] = 20e-6
                 param_dict['cycle'] = cycle
