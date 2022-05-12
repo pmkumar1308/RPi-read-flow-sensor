@@ -16,7 +16,7 @@ import DAC8532
 import lib
 
 
-file_path = '/home/pi/Inflating_and_deflating_finger_data.csv'
+file_path = '/home/pi/Offset_voltage_pressure_data_inflation.csv'
 
 if os.path.exists(file_path):
     os.remove(file_path)
@@ -38,8 +38,26 @@ CONTROL_OFFSET = 0
 CURRENT_DRIVER_SENSE_RES_VALUE = 2.08
 NUM_CYCLES = 5
 MAX_PRESSURE = 25 # kPa
+PRESSURE_TOLERANCE = 2 #kPa
+SUPPLY_PRESSURE = 310 #kPa
+VOLTAGE_STEP = 0.05
+
+def log_data_exp(log,pressure_val, actual_pressure_step, 
+             voltage_value, supply_pressure):
+    """
+    Reads and stores data in the file open in .csv format
+    """
+    
+    # voltage = actual_channel.voltage 
+    # set_pt_voltage = set_point_channel.voltage 
+    # voltage_pressure = pressure_ch.voltage 
+    today = date.today()
+    log.write("{0}, {1}, {2}, {3}, {4}\n".format(str(today.strftime("%d/%m/%Y")),
+        str(pressure_val),str(actual_pressure_step),str (voltage_value), str(supply_pressure)))
 
 if __name__ == '__main__':
+
+    pressure_offset = {}
 
     param_dict = {
 
@@ -104,7 +122,7 @@ if __name__ == '__main__':
         "trajType" : "sin"
         }
 
-     #Initialising arrays for storing flow and pressure values for calculating movingaverage
+    #Initialising arrays for storing flow and pressure values for calculating movingaverage
     param_dict['flow_values']=np.empty(param_dict['NumberOfRuns']+2)
     param_dict['pressure_values'] = np.empty(param_dict['NumberOfRuns']+2)
     param_dict['t_start'] = time.time() + MV_AVG_DEPTH * param_dict['del_t']
@@ -120,7 +138,7 @@ if __name__ == '__main__':
             cycle = 0
             initial_pressure = lib.convert_volt2pressure(param_dict['adc'].ADS1256_GetChannalValue(param_dict['pressure_channel']) * 5.0/0x7fffff)
             while True:
-                if initial_pressure > 10:
+                if initial_pressure > 2:
                     #Checking the initial pressure to make sure the tube is empty:
                     initial_pressure = lib.convert_volt2pressure(param_dict['adc'].ADS1256_GetChannalValue(param_dict['pressure_channel']) * 5.0/0x7fffff)
                     print(".........Deflating the tube, initial pressure inside the tube: ", initial_pressure)                    
@@ -128,42 +146,54 @@ if __name__ == '__main__':
                 else:
                     param_dict['dac'].DAC8532_Out_Voltage(DAC8532.channel_B, 0)
                     break  
-
-            # Increasing mass to initial mass i.e from 0 to initialMass
-            param_dict['i']=0
-            param_dict['t']=0
-            param_dict['t_absolute_start'] = time.time()        
-            param_dict = lib.runKelly(param_dict, log, mode="inflation")
-
-            print("Current mass after inflation to initial mass: " + str(param_dict['CurrentMass'] * 1e6) + " mg")
            
             ## CYCLES START ##
             pressure = lib.convert_volt2pressure(param_dict['adc'].ADS1256_GetChannalValue(param_dict['pressure_channel']) * 5.0/0x7fffff)
-            while  pressure < MAX_PRESSURE:
-            # Cycle between two masses
-                
-                
-                ############################ INFLATION ##########################
-                param_dict['i']=0
-                param_dict['t']=0
-                param_dict['time_val'] = 0
-                param_dict['initialMass'] = 10e-6
-                param_dict['finalMass'] = 35e-6
-               
-                param_dict['set_voltage_def'] = 0                
-
+            pressure_steps = np.arange(10,170,10)
+            for pressure_step in pressure_steps:              
+                print("Pressure step: ", pressure_step)
+                param_dict['set_voltage_inf'] = 0
                 print("Inflation started")
+                while True: 
+                ############################ INFLATION ##########################
+
+                    if pressure < pressure_step:
+                        param_dict['i']=0
+                        param_dict['t']=0
+                        param_dict['time_val'] = 0
+                        param_dict['initialMass'] = 10e-6
+                        param_dict['finalMass'] = 35e-6
+                        param_dict['do_log'] = False
+                       
+                        param_dict['set_voltage_def'] = 0      
+                        
+                        # Control valve for inflation
+                        param_dict['set_voltage_inf'] += VOLTAGE_STEP
+                        print("Setting voltage: ", param_dict['set_voltage_inf']) 
+                        param_dict['dac'].DAC8532_Out_Voltage(param_dict['select_channel_inf'], param_dict['set_voltage_inf'])
+
+                        pressure = lib.convert_volt2pressure(param_dict['adc'].ADS1256_GetChannalValue(param_dict['pressure_channel']) * 5.0/0x7fffff)
+                        if pressure > pressure_step:
+                            param_dict['set_voltage_inf'] = 0
+                            param_dict['dac'].DAC8532_Out_Voltage(DAC8532.channel_A, 0)
+                            print("Pressure reached = ", pressure)
+                            break
+                            
+                  
+                while True: 
+                    param_dict['set_voltage_inf'] += VOLTAGE_STEP
+                    print("Setting voltage again: ", param_dict['set_voltage_inf']) 
+                    param_dict['do_log'] = False
+                    # Control valve for inflation
+                    param_dict['dac'].DAC8532_Out_Voltage(param_dict['select_channel_inf'], param_dict['set_voltage_inf'])
+                    pressure = lib.convert_volt2pressure(param_dict['adc'].ADS1256_GetChannalValue(param_dict['pressure_channel']) * 5.0/0x7fffff)
+                    if (pressure - pressure_step) > PRESSURE_TOLERANCE:
+                        pressure_offset[str(pressure_step)] = param_dict['set_voltage_inf']                        
+                        log_data_exp(log,pressure, pressure_step,param_dict['set_voltage_inf'], SUPPLY_PRESSURE)
+                        break
                 
-                # Control valve for inflation
-                param_dict = lib.runKelly_open_loop(param_dict, log, mode="inflation")
-
-                print("Inflation complete")
-                param_dict['dac'].DAC8532_Out_Voltage(DAC8532.channel_A, 0)
-
-                param_dict['set_voltage_inf'] += 0.1
-                pressure = lib.convert_volt2pressure(param_dict['adc'].ADS1256_GetChannalValue(param_dict['pressure_channel']) * 5.0/0x7fffff)
-                
-
+            # Writing Data to csv
+            
                 
                 
                 
@@ -198,9 +228,9 @@ if __name__ == '__main__':
                 # print("Cycle(s) completed: ",cycle)
 
             ############################### END OF CYCLNG ##########################
-            print("All cycles complete")
+            print("Experiment complete")
             print("Data recorded")
-            print("Time elapsed: ", param_dict['time_log'])
+            # print("Time elapsed: ", param_dict['time_log'])
             param_dict['dac'].DAC8532_Out_Voltage(0x30, 0)
             param_dict['dac'].DAC8532_Out_Voltage(0x34, 0)
             GPIO.cleanup()

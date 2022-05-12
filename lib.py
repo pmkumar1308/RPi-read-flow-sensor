@@ -18,7 +18,7 @@ DEVICE_BUS_INFLATION = 1 #I2C bus used for inflation
 DEVICE_BUS_DEFLATION = 3 #I2C bus used for deflation
 DEVICE_ADDR = 0x01 #Default Sensirion SFM4100-Air device address
 SCALE_FACTOR = 1000 #Used to convert the value recieved to slm(standard litre per minute)  
-PRESSURE_ERROR = -(6.246343882527859 + 0.5100433517496086 + 10.65)
+PRESSURE_ERROR = -(6.246343882527859 + 0.5100433517496086 + 10.65 + 3.52)
 PRESSURE_VOLT_DIV_FACT = 1.46 # Voltage divider factor for pressure sensor
 MV_AVG_DEPTH = 10 # Depth of moving average
 AIR_MASS_PER_LITRE = 1.292e-3 # in kg at STP
@@ -27,8 +27,9 @@ MAX_SET_VALUE = 5 #Maximum voltage to be set
 MIN_SET_VALUE = 0 #Minimum voltage to be set
 OFFSET = 0
 CONTROL_OFFSET = 0
-TIME_DURATION = 4 + CONTROL_OFFSET
+TIME_DURATION = 2 + CONTROL_OFFSET
 CURRENT_DRIVER_SENSE_RES_VALUE = 2.08
+PRESSURE_OFFSET_INTERVAL = 25
 
 
 """The calibrated signal read from the flow sensor is a signed
@@ -62,9 +63,12 @@ def convertVolt2DacVal(volt_val):
     """
     return int(((volt_val-OFFSET)/MAX_SET_VALUE) * 4096)
 
-def flow_start_voltage_pressure (pressure):
-    a,b,c = [0.70487578, -0.28534515 , 2.76591885]
-    return a * pressure + b * pressure**2 + c
+def flow_start_voltage_pressure (pressure_difference, mode):
+    if mode == 'inflation':
+        a,b = [-0.00840399 , 5.49801132]
+    if mode == 'deflation':
+        a,b = [-0.00906008 , 4.65781621]
+    return a * pressure_difference + b
 
 class CubicInterpolation:
 
@@ -258,6 +262,13 @@ def runKelly(params, log, mode):
         print("Final Mass for inflation: ",params['finalMass'])
         params['t_start'] = time.time()
 
+        # Setting baseline voltage for control
+        params['p_after1'] = convert_volt2pressure(params['adc'].ADS1256_GetChannalValue(params['pressure_channel']) * 5.0/0x7fffff) # 8 ms Full scale output is 0x7fffff for the ADC
+        pressure_diff = params['supply_pressure'] - params['p_after1']
+        params['set_voltage_inf'] = flow_start_voltage_pressure(pressure_diff,'inflation')
+        
+        print("Baseline voltage for inflation: {} at pressure difference : {}".format(params['set_voltage_inf'],pressure_diff))
+
         while(True  & (params['t'] <= TIME_DURATION) & (params['p_after1'] < 250.0)): # & (params['CurrentMass'] <= params['finalMass'] )): #&  (avg_flow_value>=0.5)):
             time_loop_start = time.time()
             flow_val = ReadSensirion(params['bus_inf']) # 5 ms                         
@@ -284,29 +295,31 @@ def runKelly(params, log, mode):
                 targetFlow = convert_kgs2lmin(traj.getFlow(params['t']))
                 desiredMass = traj.getMass(params['t'])
                 # print("Desired Mass during inflation: {} at time {}".format(desiredMass,params['t']))
-
-                pressure_diff = params['supply_pressure'] - params['p_after1']/100
-
+                params['supply_pressure'] - params['p_after1']
+                if i%PRESSURE_OFFSET_INTERVAL == 0:
+                    params['set_voltage_inf'] = flow_start_voltage_pressure(pressure_diff,mode)
                 params['set_voltage_inf'] = cf.contolLaw(params['set_voltage_inf'],desiredMass,params['CurrentMass'])
                
                 params['dac'].DAC8532_Out_Voltage(params['select_channel_inf'], params['set_voltage_inf']) # 3 ms
                 
                 del_t_corrected = time.time() - time_loop_start
                 params['CurrentMass'] = params['CurrentMass'] +  del_t_corrected * convert_lmin2kgs(avgFlowValue)
-               
+                
                 params['Current_GT_mass'] = computeMassDelta(avgPressureValue,p_before=0.0, r=287.058, t=293.15)                    
                 params['t']= time.time() - params['t_start'] - params['time_spent'] 
                 params['time_val'] = params['t']
                 
                 params['time_log']  = time.time() - params['t_absolute_start'] - params['time_spent']
                 
-                log_data(log, params['time_log'], avgFlowValue, targetFlow,
+                if params['do_log'] == True: 
+                    log_data(log, params['time_log'], avgFlowValue, targetFlow,
                     avgPressureValue, params['CurrentMass'], params['Current_GT_mass'], 
                     desiredMass, params['set_voltage_inf'],sense_current_inf, params['set_voltage_def'])
 
             timeOffset = time.time()-time_loop_start
-                
+            print("Time offset: ",timeOffset)   
             if params['del_t'] - timeOffset <= 0:
+                print("Time offset: ",timeOffset)
                 time.sleep(0)
             else:
                 time.sleep(params['del_t'] - timeOffset)
@@ -320,6 +333,11 @@ def runKelly(params, log, mode):
         i = params['i']
         params['t_start'] = time.time()
 
+        # Setting baseline voltage for control
+        params['p_after1'] = convert_volt2pressure(params['adc'].ADS1256_GetChannalValue(params['pressure_channel']) * 5.0/0x7fffff) # 8 ms Full scale output is 0x7fffff for the ADC
+        pressure_diff = params['p_after1']
+        params['set_voltage_def'] = flow_start_voltage_pressure(pressure_diff,mode)
+        print("Baseline voltage for deflation: {} at pressure difference : {}".format(params['set_voltage_def'],pressure_diff))
         while(True  & (params['t'] <=  TIME_DURATION)): #&  (avg_flow_value>=0.5)):
             time_loop_start = time.time()
             flow_val = ReadSensirion(params['bus_def']) # 5 ms                         
@@ -346,11 +364,13 @@ def runKelly(params, log, mode):
                 targetFlow = convert_kgs2lmin(traj.getFlow(params['t']))
                 desiredMass = traj.getMass(params['t'])
                 # print("Desired Mass during deflation: {} at time {}".format(desiredMass,params['t']))
-                print("Desired Mass during deflation: ", desiredMass)
+                # print("Desired Mass during deflation: ", desiredMass)
                 
                 # print("Current Mass during deflation: ", params['CurrentMass'])
-                pressure_diff = params['supply_pressure'] - params['p_after1']/100
-                
+                # params['p_after1'] = convert_volt2pressure(params['adc'].ADS1256_GetChannalValue(params['pressure_channel']) * 5.0/0x7fffff) # 8 ms Full scale output is 0x7fffff for the ADC
+                pressure_diff = params['p_after1']
+                if i%PRESSURE_OFFSET_INTERVAL == 0:
+                    params['set_voltage_def'] = flow_start_voltage_pressure(pressure_diff,mode)
                 params['set_voltage_def'] = cf.contolLaw(params['set_voltage_def'],params['CurrentMass'],desiredMass)
                
                 params['dac'].DAC8532_Out_Voltage(params['select_channel_def'], params['set_voltage_def']) # 3 ms
@@ -362,15 +382,18 @@ def runKelly(params, log, mode):
                 params['t']= time.time() - params['t_start'] - params['time_spent'] 
                 params['time_val'] = params['t']
                 params['time_log'] = time.time() - params['t_absolute_start'] - params['time_spent']
-                log_data(log,params['time_log'],-avgFlowValue,targetFlow,
-                    avgPressureValue,params['CurrentMass'], params['Current_GT_mass'], 
-                    desiredMass, params['set_voltage_inf'], sense_current_def, params['set_voltage_def'])
+                if params['do_log'] == True:
+                    log_data(log,params['time_log'],-avgFlowValue,targetFlow,
+                        avgPressureValue,params['CurrentMass'], params['Current_GT_mass'], 
+                        desiredMass, params['set_voltage_inf'], sense_current_def, params['set_voltage_def'])
 
             # print("Current Mass after deflation: ",params['CurrentMass'])
         
             timeOffset = time.time()-time_loop_start
+            print("Time offset: ",timeOffset)
                 
             if params['del_t'] - timeOffset <= 0:
+
                 time.sleep(0)
             else:
                 time.sleep(params['del_t'] - timeOffset)
@@ -378,124 +401,124 @@ def runKelly(params, log, mode):
 
     return params
 
-def runKelly_open_loop(params, log, mode):
+# def runKelly_open_loop(params, log, mode):
 
-    if mode == 'inflation':
-        i = params['i']
-        traj = trajectoryGenerator.choose(params['trajType'],params['initialMass'],params['finalMass'])            
-        print("Final Mass for inflation: ",params['finalMass'])
-        params['t_start'] = time.time()
+#     if mode == 'inflation':
+#         i = params['i']
+#         traj = trajectoryGenerator.choose(params['trajType'],params['initialMass'],params['finalMass'])            
+#         print("Final Mass for inflation: ",params['finalMass'])
+#         params['t_start'] = time.time()
 
-        while(True & (params['p_after1'] < 250.0)): # & (params['CurrentMass'] <= params['finalMass'] )): #&  (avg_flow_value>=0.5)):
-            time_loop_start = time.time()
-            flow_val = ReadSensirion(params['bus_inf']) # 5 ms                         
-            params['p_after1'] = convert_volt2pressure(params['adc'].ADS1256_GetChannalValue(params['pressure_channel']) * 5.0/0x7fffff) # 8 ms Full scale output is 0x7fffff for the ADC
+#         while(True & (params['p_after1'] < 250.0)): # & (params['CurrentMass'] <= params['finalMass'] )): #&  (avg_flow_value>=0.5)):
+#             time_loop_start = time.time()
+#             flow_val = ReadSensirion(params['bus_inf']) # 5 ms                         
+#             params['p_after1'] = convert_volt2pressure(params['adc'].ADS1256_GetChannalValue(params['pressure_channel']) * 5.0/0x7fffff) # 8 ms Full scale output is 0x7fffff for the ADC
             
-            if params['p_after1'] > 200:
-                print("Pressure exceeded, stopping....")
-                break
+#             if params['p_after1'] > params['step_pressure']:
+#                 print("Pressure exceeded, stopping....")
+#                 break
 
-            #Moving Average of the measure flow and pressure values
-            params['flow_values'][i] = flow_val                
-            params['pressure_values'][i] = params['p_after1']
+#             #Moving Average of the measure flow and pressure values
+#             params['flow_values'][i] = flow_val                
+#             params['pressure_values'][i] = params['p_after1']
 
-            if i < MV_AVG_DEPTH:
-                params['time_spent'] = time.time() - params['t_start']
+#             if i < MV_AVG_DEPTH:
+#                 params['time_spent'] = time.time() - params['t_start']
                 
             
-            if i >= MV_AVG_DEPTH:                    
-                avgFlowValue = np.mean(params['flow_values'][i-MV_AVG_DEPTH:i])               
-                avgPressureValue = np.mean(params['pressure_values'][i-MV_AVG_DEPTH:i]) 
+#             if i >= MV_AVG_DEPTH:                    
+#                 avgFlowValue = np.mean(params['flow_values'][i-MV_AVG_DEPTH:i])               
+#                 avgPressureValue = np.mean(params['pressure_values'][i-MV_AVG_DEPTH:i]) 
               
-                sense_current_inf = 0
+#                 sense_current_inf = 0
 
-                targetFlow = convert_kgs2lmin(traj.getFlow(params['t']))
-                desiredMass = traj.getMass(params['t'])
-                # print("Desired Mass during inflation: {} at time {}".format(desiredMass,params['t']))
+#                 targetFlow = convert_kgs2lmin(traj.getFlow(params['t']))
+#                 desiredMass = traj.getMass(params['t'])
+#                 # print("Desired Mass during inflation: {} at time {}".format(desiredMass,params['t']))
 
-                pressure_diff = params['supply_pressure'] - params['p_after1']/100
+#                 pressure_diff = params['supply_pressure'] - params['p_after1']/100
 
                 
-                params['dac'].DAC8532_Out_Voltage(params['select_channel_inf'], params['set_voltage_inf']) # 3 ms
+#                 params['dac'].DAC8532_Out_Voltage(params['select_channel_inf'], params['set_voltage_inf']) # 3 ms
                 
-                del_t_corrected = time.time() - time_loop_start
-                params['CurrentMass'] = params['CurrentMass'] +  del_t_corrected * convert_lmin2kgs(avgFlowValue)
+#                 del_t_corrected = time.time() - time_loop_start
+#                 params['CurrentMass'] = params['CurrentMass'] +  del_t_corrected * convert_lmin2kgs(avgFlowValue)
                
-                params['Current_GT_mass'] = computeMassDelta(avgPressureValue,p_before=0.0, r=287.058, t=293.15)                    
-                params['t']= time.time() - params['t_start'] - params['time_spent'] 
-                params['time_val'] = params['t']
+#                 params['Current_GT_mass'] = computeMassDelta(avgPressureValue,p_before=0.0, r=287.058, t=293.15)                    
+#                 params['t']= time.time() - params['t_start'] - params['time_spent'] 
+#                 params['time_val'] = params['t']
                 
-                params['time_log']  = time.time() - params['t_absolute_start'] - params['time_spent']
+#                 params['time_log']  = time.time() - params['t_absolute_start'] - params['time_spent']
                 
-                log_data(log, params['time_log'], avgFlowValue, targetFlow,
-                    avgPressureValue, params['CurrentMass'], params['Current_GT_mass'], 
-                    desiredMass, params['set_voltage_inf'],sense_current_inf, params['set_voltage_def'])
+#                 log_data(log, params['time_log'], avgFlowValue, targetFlow,
+#                     avgPressureValue, params['CurrentMass'], params['Current_GT_mass'], 
+#                     desiredMass, params['set_voltage_inf'],sense_current_inf, params['set_voltage_def'])
 
-            timeOffset = time.time()-time_loop_start
+#             timeOffset = time.time()-time_loop_start
                 
-            if params['del_t'] - timeOffset <= 0:
-                time.sleep(0)
-            else:
-                time.sleep(params['del_t'] - timeOffset)
-            i+=1
+#             if params['del_t'] - timeOffset <= 0:
+#                 time.sleep(0)
+#             else:
+#                 time.sleep(params['del_t'] - timeOffset)
+#             i+=1
 
-    if mode == 'deflation':
-        traj = trajectoryGenerator.choose(params['trajType'],params['finalMass'],params['initialMass'])
+#     if mode == 'deflation':
+#         traj = trajectoryGenerator.choose(params['trajType'],params['finalMass'],params['initialMass'])
 
-        print('Cycle: ')
-        print("Final Mass for deflation: ",params['initialMass'])
-        i = params['i']
-        params['t_start'] = time.time()
+#         print('Cycle: ')
+#         print("Final Mass for deflation: ",params['initialMass'])
+#         i = params['i']
+#         params['t_start'] = time.time()
 
-        while(True): #&  (avg_flow_value>=0.5)):
-            time_loop_start = time.time()
-            flow_val = ReadSensirion(params['bus_def']) # 5 ms                         
-            params['p_after1'] = convert_volt2pressure(params['adc'].ADS1256_GetChannalValue(params['pressure_channel']) * 5.0/0x7fffff) # 8 ms Full scale output is 0x7fffff for the ADC
+#         while(True): #&  (avg_flow_value>=0.5)):
+#             time_loop_start = time.time()
+#             flow_val = ReadSensirion(params['bus_def']) # 5 ms                         
+#             params['p_after1'] = convert_volt2pressure(params['adc'].ADS1256_GetChannalValue(params['pressure_channel']) * 5.0/0x7fffff) # 8 ms Full scale output is 0x7fffff for the ADC
             
-            if params['p_after1'] > 200:
-                print("Pressure exceeded, stopping....")
-                break
+#             if params['p_after1'] > 200:
+#                 print("Pressure exceeded, stopping....")
+#                 break
 
-            #Moving Average of the measure flow and pressure values
-            params['flow_values'][i] = flow_val                
-            params['pressure_values'][i] = params['p_after1']
+#             #Moving Average of the measure flow and pressure values
+#             params['flow_values'][i] = flow_val                
+#             params['pressure_values'][i] = params['p_after1']
 
-            if i < MV_AVG_DEPTH:
-                params['time_spent'] = time.time() - params['t_start']            
+#             if i < MV_AVG_DEPTH:
+#                 params['time_spent'] = time.time() - params['t_start']            
                
 
-            if i >= MV_AVG_DEPTH:                    
-                avgFlowValue = np.mean(params['flow_values'][i-MV_AVG_DEPTH:i])               
-                avgPressureValue = np.mean(params['pressure_values'][i-MV_AVG_DEPTH:i])                
-                sense_current_def = 0
+#             if i >= MV_AVG_DEPTH:                    
+#                 avgFlowValue = np.mean(params['flow_values'][i-MV_AVG_DEPTH:i])               
+#                 avgPressureValue = np.mean(params['pressure_values'][i-MV_AVG_DEPTH:i])                
+#                 sense_current_def = 0
 
-                targetFlow = convert_kgs2lmin(traj.getFlow(params['t']))
-                desiredMass = traj.getMass(params['t'])
-                print("Desired Mass during deflation: ", desiredMass)
+#                 targetFlow = convert_kgs2lmin(traj.getFlow(params['t']))
+#                 desiredMass = traj.getMass(params['t'])
+#                 print("Desired Mass during deflation: ", desiredMass)
                 
-                # print("Current Mass during deflation: ", params['CurrentMass'])
-                pressure_diff = params['supply_pressure'] - params['p_after1']/100           
+#                 # print("Current Mass during deflation: ", params['CurrentMass'])
+#                 pressure_diff = params['supply_pressure'] - params['p_after1']/100           
                 
                
-                params['dac'].DAC8532_Out_Voltage(params['select_channel_def'], params['set_voltage_def']) # 3 ms
+#                 params['dac'].DAC8532_Out_Voltage(params['select_channel_def'], params['set_voltage_def']) # 3 ms
                 
-                del_t_corrected = time.time() - time_loop_start
-                params['CurrentMass'] = params['CurrentMass'] -  del_t_corrected * convert_lmin2kgs(avgFlowValue)
+#                 del_t_corrected = time.time() - time_loop_start
+#                 params['CurrentMass'] = params['CurrentMass'] -  del_t_corrected * convert_lmin2kgs(avgFlowValue)
                
-                params['Current_GT_mass'] = computeMassDelta(avgPressureValue,p_before=0.0, r=287.058, t=293.15)                    
-                params['t']= time.time() - params['t_start'] - params['time_spent'] 
-                params['time_val'] = params['t']
-                params['time_log'] = time.time() - params['t_absolute_start'] - params['time_spent']
-                log_data(log,params['time_log'],-avgFlowValue,targetFlow,
-                    avgPressureValue,params['CurrentMass'], params['Current_GT_mass'], 
-                    desiredMass, params['set_voltage_inf'], sense_current_def, params['set_voltage_def'])
+#                 params['Current_GT_mass'] = computeMassDelta(avgPressureValue,p_before=0.0, r=287.058, t=293.15)                    
+#                 params['t']= time.time() - params['t_start'] - params['time_spent'] 
+#                 params['time_val'] = params['t']
+#                 params['time_log'] = time.time() - params['t_absolute_start'] - params['time_spent']
+#                 log_data(log,params['time_log'],-avgFlowValue,targetFlow,
+#                     avgPressureValue,params['CurrentMass'], params['Current_GT_mass'], 
+#                     desiredMass, params['set_voltage_inf'], sense_current_def, params['set_voltage_def'])
         
-            timeOffset = time.time()-time_loop_start
+#             timeOffset = time.time()-time_loop_start
                 
-            if params['del_t'] - timeOffset <= 0:
-                time.sleep(0)
-            else:
-                time.sleep(params['del_t'] - timeOffset)
-            i+=1
+#             if params['del_t'] - timeOffset <= 0:
+#                 time.sleep(0)
+#             else:
+#                 time.sleep(params['del_t'] - timeOffset)
+#             i+=1
 
-    return params
+#     return params

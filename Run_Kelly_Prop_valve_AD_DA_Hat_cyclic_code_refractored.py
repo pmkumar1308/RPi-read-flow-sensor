@@ -36,7 +36,7 @@ OFFSET = 0
 CONTROL_OFFSET = 0
 # TIME_DURATION = 2 + CONTROL_OFFSET
 CURRENT_DRIVER_SENSE_RES_VALUE = 2.08
-NUM_CYCLES = 5
+NUM_CYCLES = 20
 
 if __name__ == '__main__':
 
@@ -49,7 +49,7 @@ if __name__ == '__main__':
         'avg_flow_value' : 4  ,      
 
         ###### del_t for sampling ######
-        'del_t' : 0.035,# s
+        'del_t' : 0.02,# s
        
         
         # For Sensirion I2C bus
@@ -76,20 +76,20 @@ if __name__ == '__main__':
         'time_spent' : 0,
 
         # Setting baseline control voltage
-        'supply_pressure' : 3, # bar
+        'supply_pressure' : 310, # kPa
         'set_voltage_inf' : 2.5,# V
         'set_voltage_def' : 0, # V
 
         #####-----Define masses-----#####
         'initialMass' : 0,
-        'finalMass' : 10e-6, # mg
+        'finalMass' : 20e-6, # mg
 
         #### ---- Control gains ---- ####
-        'controlKP' : 1100,
+        'controlKP' : 1200,
         # controlKP = float(input("Proportional Gain: "))
-        'controlKD' : 500,
+        'controlKD' : 100,
         # controlKD = float(input("Derivative Gain: "))
-        'controlKI' : 300,
+        'controlKI' : 100,
         # controlKI = float(input("Integral Gain: "))
         
         # Initialising time for the computation of the trajectory
@@ -113,13 +113,14 @@ if __name__ == '__main__':
     param_dict['dac'].DAC8532_Out_Voltage(DAC8532.channel_A, 0)
     param_dict['dac'].DAC8532_Out_Voltage(DAC8532.channel_B, 0)
 
+    param_dict['do_log'] = True
 
     try:
         with open(file_path, "a") as log:     
             cycle = 0
             initial_pressure = lib.convert_volt2pressure(param_dict['adc'].ADS1256_GetChannalValue(param_dict['pressure_channel']) * 5.0/0x7fffff)
             while True:
-                if initial_pressure > 10:
+                if initial_pressure > 2:
                     #Checking the initial pressure to make sure the tube is empty:
                     initial_pressure = lib.convert_volt2pressure(param_dict['adc'].ADS1256_GetChannalValue(param_dict['pressure_channel']) * 5.0/0x7fffff)
                     print(".........Deflating the tube, initial pressure inside the tube: ", initial_pressure)                    
@@ -145,12 +146,12 @@ if __name__ == '__main__':
                 param_dict['i']=0
                 param_dict['t']=0
                 param_dict['time_val'] = 0
-                param_dict['initialMass'] = 10e-6
+                param_dict['initialMass'] = 20e-6
                 param_dict['finalMass'] = 35e-6
                 param_dict['set_voltage_inf'] = 2.85
                 param_dict['set_voltage_def'] = 0
                 param_dict['cycle'] = cycle
-
+                param_dict['del_t'] = 0.018
 
                 print("Inflation started")
                 # print("Current mass: ", param_dict['CurrentMass'])
@@ -173,15 +174,16 @@ if __name__ == '__main__':
                 param_dict['i']=0
                 param_dict['t']=0
                 param_dict['t_start'] = time.time()               
-                param_dict['initialMass'] = 10e-6
+                param_dict['initialMass'] = 20e-6
                 param_dict['finalMass'] = 35e-6
                 param_dict['cycle'] = cycle
+                param_dict['del_t'] = 0.016
 
                 param_dict['set_voltage_inf'] = 0
                 param_dict['set_voltage_def'] = 3.75
 
-                pressure_inside_valve = lib.convert_volt2pressure(param_dict['adc'].ADS1256_GetChannalValue(param_dict['pressure_channel']) * 5.0/0x7fffff)/100 # in bar
-                set_voltage_def = lib.flow_start_voltage_pressure(pressure_inside_valve)
+                # pressure_inside_valve = lib.convert_volt2pressure(param_dict['adc'].ADS1256_GetChannalValue(param_dict['pressure_channel']) * 5.0/0x7fffff)/100 # in bar
+                # set_voltage_def = lib.flow_start_voltage_pressure(pressure_inside_valve)
                 
                 # print("The flow start voltage for deflation: ",set_voltage_def)
                 # print("The pressure after inflation is: ", pressure_inside_valve)
