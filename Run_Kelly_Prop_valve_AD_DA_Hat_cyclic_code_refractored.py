@@ -120,7 +120,7 @@ if __name__ == '__main__':
             cycle = 0
             initial_pressure = lib.convert_volt2pressure(param_dict['adc'].ADS1256_GetChannalValue(param_dict['pressure_channel']) * 5.0/0x7fffff)
             while True:
-                if initial_pressure > 2:
+                if initial_pressure > 10:
                     #Checking the initial pressure to make sure the tube is empty:
                     initial_pressure = lib.convert_volt2pressure(param_dict['adc'].ADS1256_GetChannalValue(param_dict['pressure_channel']) * 5.0/0x7fffff)
                     print(".........Deflating the tube, initial pressure inside the tube: ", initial_pressure)                    
@@ -147,13 +147,13 @@ if __name__ == '__main__':
                 param_dict['t']=0
                 param_dict['time_val'] = 0
                 param_dict['initialMass'] = 20e-6
-                param_dict['finalMass'] = 50e-6
+                param_dict['finalMass'] = 60e-6
                 
                 param_dict['set_voltage_def'] = 0
                 param_dict['cycle'] = cycle
                 param_dict['del_t'] = 0.018
-                param_dict['controlKP'] = 100000
-                param_dict['controlKD'] = 3500
+                param_dict['controlKP'] = 7000000
+                param_dict['controlKD'] = 40000
 
                 print("Inflation started")
                 
@@ -168,18 +168,18 @@ if __name__ == '__main__':
                 print(param_dict['i'])
                 
                 ############################# DEFLATION ###########################
-                time.sleep(0.5)
+                
                 print("Deflation started")
                 param_dict['i']=0
                 param_dict['t']=0
                 param_dict['t_start'] = time.time()               
                 param_dict['initialMass'] = 20e-6
-                param_dict['finalMass'] = 50e-6
+                param_dict['finalMass'] = 60e-6
                 param_dict['set_voltage_inf'] = 0
                 param_dict['cycle'] = cycle
                 param_dict['del_t'] = 0.016
-                param_dict['controlKP'] = 100000
-                param_dict['controlKD'] = 6000
+                param_dict['controlKP'] = 350000
+                param_dict['controlKD'] = 4000
 
                 # param_dict['set_voltage_inf'] = 0
                 # param_dict['set_voltage_def'] = 3.75
@@ -192,7 +192,7 @@ if __name__ == '__main__':
                 param_dict['dac'].DAC8532_Out_Voltage(DAC8532.channel_B, 0)
                 print("Current mass after deflation: " + str(param_dict['CurrentMass'] * 1e6) + " mg")
                 print("Cycle(s) completed: ",cycle)
-                time.sleep(0.5)
+                
             ############################### END OF CYCLNG ##########################
             print("All cycles complete")
             print("Data recorded")
