@@ -10,6 +10,7 @@ from prop_valves.srv import ControlVariables
 from prop_valves.msg import FlowSensor, Control
 
 
+
 file_path = '/home/pi/Inflating_and_deflating_finger_data.csv'
 
 if os.path.exists(file_path):
@@ -28,10 +29,78 @@ MAX_SET_VALUE = 5 #Maximum voltage to be set
 MIN_SET_VALUE = 0 #Minimum voltage to be set
 OFFSET = 0
 CONTROL_OFFSET = 0
-# TIME_DURATION = 2 + CONTROL_OFFSET
+TIME_DURATION = 3 + CONTROL_OFFSET
 CURRENT_DRIVER_SENSE_RES_VALUE = 2.08
 NUM_CYCLES = 10
 MASS_TOLERANCE = 1e-6
+
+class CubicInterpolation:
+
+    def __init__(self, mass_initial, mass_to_reach):
+        self.completion_time = TIME_DURATION
+        self.a_0 = mass_initial
+        self.a_1 = 0
+        self.a_2 = (3/(self.completion_time**2))*(mass_to_reach - mass_initial)
+        self.a_3 = - (2/(self.completion_time**3))*(mass_to_reach - mass_initial)
+        
+    def getMass(self,t):
+        return self.a_0 + self.a_1 * t + self.a_2 * t**2 + self.a_3 * t**3
+
+    def getFlow(self,t):
+        return self.a_1 + 2 * self.a_2 * t + 3 * self.a_3 * t**2
+
+class sinosoidalTrajectory:
+    def __init__(self,mass_initial, mass_to_reach):
+        self.initial_mass = mass_initial
+        self.final_mass = mass_to_reach
+        self.completion_time = 2 * TIME_DURATION
+        self.amplitude = (mass_to_reach - mass_initial)/2
+        self.frequency = 1 / self.completion_time
+
+    def getMass(self,t):
+        return self.amplitude*np.sin(2 * np.pi * self.frequency * t - np.pi/2 ) + (self.initial_mass + self.final_mass)/2 #/ self.completion_time
+    
+    def getFlow(self,t):
+        return self.amplitude*np.cos(2 * np.pi * self.frequency * t - np.pi/2) 
+
+class CubicTrjectoryCyclic:
+    def __init__(self,mass_initial, mass_to_reach, num_cycles):
+        self.completion_time = TIME_DURATION
+        self.a_0 = mass_initial
+        self.a_1 = 0
+        self.a_2 = (3/(self.completion_time**2))*(mass_to_reach - mass_initial)
+        self.a_3 = - (2/(self.completion_time**3))*(mass_to_reach - mass_initial)
+        self.num_cycles = num_cycles
+
+    def getMass(self,t):
+        return self.a_0 + self.a_1 * t + self.a_2 * t**2 + self.a_3 * t**3
+    
+    def getFlow(self,t):
+        return self.a_1 + 2 * self.a_2 * t + 3 * self.a_3 * t**2
+
+
+class stepFunction:
+    def __init__(self,mass_initial, mass_to_reach):
+        self.initial_mass = mass_initial
+        self.final_mass = mass_to_reach
+
+    def getMass(self,t):
+        return self.final_mass
+    
+    def getFlow(self,t):
+        return 0 ##  TODO
+
+class trajectoryGenerator:
+    def choose(trajectoryName,mass_initial, mass_to_reach):
+        if trajectoryName == "cubic":
+            print("cubic trajectory")
+            return CubicInterpolation(mass_initial, mass_to_reach)
+        if trajectoryName == "sin":
+            print("Using sinosoidal trajectory")
+            return sinosoidalTrajectory(mass_initial, mass_to_reach)
+        if trajectoryName == 'step':
+            print("Stepping to target mass")
+            return 
                     
 def usage():
     return "Please input like this: %s [target_mass(in mg) target_flow(in l/min)]"%sys.argv[0]
@@ -47,25 +116,67 @@ def convert_lmin2kgs(value_lmin):
 if __name__ == '__main__':
 
     try:
-        if len(sys.argv) == 3:
-            target_mass = float(sys.argv[1])
-            target_flow = float(sys.argv[2])      
-        else:
-            print(usage())
+        # if len(sys.argv) == 3:
+        #     target_mass = float(sys.argv[1])
+        #     target_flow = float(sys.argv[2])      
+        # else:
+        #     print(usage())
+
+        target_mass = float(input("Input Target Mass: "))
+        traj_type = input("Trajectory type: ")
+        current_mass = rospy.get_param("current_mass")
+
+        traj = trajectoryGenerator.choose(traj_type,current_mass,target_mass)
         
-        pub = rospy.Publisher("ControlTargets", Control, queue_size = 5)   
+        pub = rospy.Publisher("ControlTargets", Control, queue_size = 100)   
         rospy.init_node('prop_valve_client')
-        rate = rospy.Rate(200)
+        rate = rospy.Rate(50)
+        traj_start_time = time.time()
+        t =0
+        num_cycles = 5
+        cycles = 0
+        while cycles < num_cycles:
+            traj = trajectoryGenerator.choose(traj_type,current_mass,target_mass)
+            time_start=time.time()
+            t=0
+            while t < (TIME_DURATION): 
+                
+                desired_mass = traj.getMass(t)
+                desired_flow = traj.getFlow(t)
+                msg = Control()
+                msg.targetMass = desired_mass
+                msg.targetFlow = desired_flow
+                pub.publish(desired_mass, desired_flow)  
+
+
+                t = time.time() - time_start
+                rate.sleep()
+
+            
+            traj = trajectoryGenerator.choose(traj_type,target_mass,current_mass) 
+            time_start=time.time()
+            t=0
+            while t < (TIME_DURATION): 
+                
+                desired_mass = traj.getMass(t)               
+                desired_flow = traj.getFlow(t)
+                msg = Control()
+                msg.targetMass = desired_mass
+                msg.targetFlow = desired_flow
+                pub.publish(desired_mass, desired_flow) 
+
+
+                t = time.time() - time_start
+                rate.sleep()
+            cycles = cycles +1
+
+
+            desired_mass_traj = traj.getMass(t)
+            
+            t = time.time() - traj_start_time
+                # 
         
-        time.sleep(1)
-        # while ~(rospy.get_param("actuating")):
-        msg = Control()
-        msg.targetMass = target_mass
-        msg.targetFlow = target_flow
-        pub.publish(target_mass, target_flow)
-            # rate.sleep()
-        
-        print("Publishing target mass: %s mg and target flow %s l/min"%(target_mass, target_flow))
+        # print("Publishing target mass: %s mg and target flow %s l/min"%(target_mass, target_flow))
 
 
     except KeyboardInterrupt:   # Press CTRL C to exit program

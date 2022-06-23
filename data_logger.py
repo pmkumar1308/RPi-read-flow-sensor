@@ -2,12 +2,12 @@ import rospy
 import os
 from prop_valves.msg import DataLog
 from prop_valves import lib
+import time
 
 
-file_path = '/home/pi/Inflating_and_deflating_finger_data.csv'
+file_path = '/home/muthukumar/Inflating_and_deflating_finger_data.csv'
 
-if os.path.exists(file_path):
-    os.remove(file_path)
+
 
 class DataLogger:
 
@@ -54,10 +54,22 @@ class DataLogger:
 
 if __name__ == '__main__':
 	rospy.init_node('data_logger_node', anonymous=True)
+
+
 	
 	with open(file_path, "a") as log:
+		
+
 		dl = DataLogger(log)
+
+		t =0
+		time_start = time.time()
 		while not rospy.is_shutdown():
+			if t > 260:
+				if os.path.exists(file_path):
+					os.remove(file_path)
+					t=0
 			rospy.Subscriber("DataLogValues",DataLog, dl.dataLogCallback)
 
-			rospy.loginfo("Data Logged")
+			print("Data Logged")
+			t = time.time() - time_start

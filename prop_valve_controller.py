@@ -77,6 +77,7 @@ class RunPropValve:
         # Setting baseline voltage for control
         params['pressure_inside'] = lib.convert_volt2pressure(params['adc'].ADS1256_GetChannalValue(params['pressure_channel']) * 5.0/0x7fffff) # 8 ms Full scale output is 0x7fffff for the ADC
        
+
         params['set_voltage_inf_base'] = lib.flow_start_voltage_pressure(params['supply_pressure']-params['pressure_inside'],'inflation')
         params['set_voltage_def_base'] = lib.flow_start_voltage_pressure(params['pressure_inside'],'deflation')
                   
@@ -119,6 +120,11 @@ class RunPropValve:
 
             # Including pressure offset
             pressure_diff = params['pressure_inside']
+            if pressure_diff < 10:
+                params['current_mass'] = 0
+                params['stop'] = True
+                print("Finger empty... cannot deflate further")
+                return params
             if PRESSURE_OFFSET_WITHIN_LOOP_DEF == True:
                 if i%PRESSURE_OFFSET_INTERVAL == 0:  
                     print("Setting baseline voltage deflation")                      
@@ -229,7 +235,9 @@ if __name__ == '__main__':
             ### Select Trajectory type ###
             "trajType" : "cubic",
 
-            "do_log" : True
+            "do_log" : True,
+
+            "stop": False
         }
 
     #Initialising arrays for storing flow and pressure values for calculating movingaverage
@@ -250,7 +258,7 @@ if __name__ == '__main__':
         print("pressure_inside less than 10...")
         rospy.set_param("current_mass",0)
     pub = rospy.Publisher('DataLogValues', DataLog, queue_size=100)
-    rate = rospy.Rate(5)
+    rate = rospy.Rate(100)
     try:
         while not rospy.is_shutdown():               
                 
@@ -266,9 +274,9 @@ if __name__ == '__main__':
             print("targetMass: ", rk.targetMass)
             print("targetFlow: ", rk.targetFlow)
             
-        
-            rate_logging = rospy.Rate(50)
-            while (abs(param_dict['current_mass'] - rk.targetMass) >= MASS_TOLERANCE):
+            param_dict['stop'] = False
+            rate_logging = rospy.Rate(40)
+            while (abs(param_dict['current_mass'] - rk.targetMass) >= MASS_TOLERANCE) and (param_dict['stop'] == False):
                 print("Target changed...actuating")
                 
                 param_dict['time_loop_start'] = time.time()  
