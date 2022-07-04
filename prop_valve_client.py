@@ -29,7 +29,7 @@ MAX_SET_VALUE = 5 #Maximum voltage to be set
 MIN_SET_VALUE = 0 #Minimum voltage to be set
 OFFSET = 0
 CONTROL_OFFSET = 0
-TIME_DURATION = 3 + CONTROL_OFFSET
+TIME_DURATION = 1 + CONTROL_OFFSET
 CURRENT_DRIVER_SENSE_RES_VALUE = 2.08
 NUM_CYCLES = 10
 MASS_TOLERANCE = 1e-6
@@ -115,28 +115,27 @@ def convert_lmin2kgs(value_lmin):
 
 if __name__ == '__main__':
 
-    try:
-        # if len(sys.argv) == 3:
-        #     target_mass = float(sys.argv[1])
-        #     target_flow = float(sys.argv[2])      
-        # else:
-        #     print(usage())
 
-        target_mass = float(input("Input Target Mass: "))
+    try:        
+
+        # target_mass = float(input("Input Target Mass: "))
+        target_mass = 70
         traj_type = input("Trajectory type: ")
+        # traj_type = "cubic"
         current_mass = rospy.get_param("current_mass")
 
         traj = trajectoryGenerator.choose(traj_type,current_mass,target_mass)
         
-        pub = rospy.Publisher("ControlTargets", Control, queue_size = 100)   
+        pub = rospy.Publisher("ControlTargets", Control, queue_size = 1)   
         rospy.init_node('prop_valve_client')
-        rate = rospy.Rate(50)
+        rate = rospy.Rate(100)
         traj_start_time = time.time()
         t =0
-        num_cycles = 5
+        num_cycles = NUM_CYCLES
         cycles = 0
+        initial_mass = 40
         while cycles < num_cycles:
-            traj = trajectoryGenerator.choose(traj_type,current_mass,target_mass)
+            traj = trajectoryGenerator.choose(traj_type,initial_mass,target_mass)
             time_start=time.time()
             t=0
             while t < (TIME_DURATION): 
@@ -146,14 +145,15 @@ if __name__ == '__main__':
                 msg = Control()
                 msg.targetMass = desired_mass
                 msg.targetFlow = desired_flow
-                pub.publish(desired_mass, desired_flow)  
+                pub.publish(desired_mass, desired_flow) 
+                print(f"Published mass: {desired_mass} Published Flow: {desired_flow}") 
 
 
                 t = time.time() - time_start
                 rate.sleep()
 
             
-            traj = trajectoryGenerator.choose(traj_type,target_mass,current_mass) 
+            traj = trajectoryGenerator.choose(traj_type,target_mass,initial_mass) 
             time_start=time.time()
             t=0
             while t < (TIME_DURATION): 

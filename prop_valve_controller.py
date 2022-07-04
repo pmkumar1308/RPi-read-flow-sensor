@@ -27,7 +27,7 @@ CONTROL_OFFSET = 0
 PRESSURE_OFFSET_INTERVAL = 30
 PRESSURE_OFFSET_WITHIN_LOOP_INF = True
 PRESSURE_OFFSET_WITHIN_LOOP_DEF = True
-MASS_TOLERANCE = 0.3e-6
+
        
 
        
@@ -39,12 +39,12 @@ class RunPropValve:
         self.control_params = {}
 
         self.current_mass = 0
-        self.control_params['KP_inf'] = 70000
-        self.control_params['KD_inf'] = 3000
+        self.control_params['KP_inf'] = rospy.get_param('KP_inf')
+        self.control_params['KD_inf'] = rospy.get_param('KD_inf')
         self.control_params['KI_inf'] = 0
 
-        self.control_params['KP_def'] = 35000
-        self.control_params['KD_def'] = 3000
+        self.control_params['KP_def'] = rospy.get_param('KP_def')
+        self.control_params['KD_def'] = rospy.get_param('KD_def')
         self.control_params['KI_def'] = 0 
 
         self.targetMass = 0
@@ -71,7 +71,8 @@ class RunPropValve:
 
     def runKelly(self, params):    
         time_loop_start = params['time_loop_start']
-        print("Final Mass: {} mg".format(params['desiredMass']*1e6))
+        print("Target Mass: {} mg".format(params['desiredMass']*1e6))
+        print(f"Target flow: {self.targetFlow}")
         i = params['i']
         
         # Setting baseline voltage for control
@@ -94,29 +95,34 @@ class RunPropValve:
         
         if params['current_mass'] < params['desiredMass']: 
 
-            params['set_voltage_inf'], params['set_voltage_def'] = cf.simulControl(params['set_voltage_inf'], params['set_voltage_def'],params['desiredMass'],params['current_mass'],lib.convert_lmin2kgs(self.targetFlow),lib.convert_lmin2kgs(self.flowValue_inf))
+            params['set_voltage_inf'], params['set_voltage_def'] = cf.simulControl(params['set_voltage_inf'], params['set_voltage_def'],params['desiredMass'],
+                params['current_mass'],lib.convert_lmin2kgs(self.targetFlow),
+                lib.convert_lmin2kgs(self.flowValue_inf), params['set_voltage_inf_base'],params['set_voltage_def_base'])
              
             # Including pressure offset
             pressure_diff = params['supply_pressure'] - params['pressure_inside']
             if PRESSURE_OFFSET_WITHIN_LOOP_INF == True:
                 if i%PRESSURE_OFFSET_INTERVAL == 0:  
-                    print("Setting baseline voltage inflation")                      
+                                         
                     params['set_voltage_inf_base'] = lib.flow_start_voltage_pressure(pressure_diff,'inflation')
+                    params['set_voltage_def_base'] = lib.flow_start_voltage_pressure(pressure_diff,'deflation')
             
             params['set_voltage_inf'] += params['set_voltage_inf_base']
             params['set_voltage_inf'] = max(min(MAX_SET_VALUE, params['set_voltage_inf']), MIN_SET_VALUE)            
             
             params['dac'].DAC8532_Out_Voltage(params['select_channel_inf'],params['set_voltage_inf'])# params['set_voltage_inf']) # 3 ms
             
-            params['dac'].DAC8532_Out_Voltage(params['select_channel_def'], 0)
-            print("flowValue deflation {} l/min  and {} mg".format(self.flowValue_inf, lib.convert_lmin2kgs(self.flowValue_inf) * 1e6))
+            params['dac'].DAC8532_Out_Voltage(params['select_channel_def'], 0) #params['set_voltage_def_base'])
+            # print("flowValue deflation {} l/min  and {} mg".format(self.flowValue_inf, lib.convert_lmin2kgs(self.flowValue_inf) * 1e6))
             self.flowValue_inf = lib.ReadSensirion(params['bus_inf'])
-            self.flowValue_def = 0           
+            self.flowValue_def = lib.ReadSensirion(params['bus_def'])         
             
             sign = 1
             
         if params['current_mass'] >= params['desiredMass']:
-            params['set_voltage_inf'], params['set_voltage_def'] = cf.simulControl(params['set_voltage_inf'], params['set_voltage_def'],params['desiredMass'],params['current_mass'],lib.convert_lmin2kgs(self.targetFlow),lib.convert_lmin2kgs(self.flowValue_def))
+            params['set_voltage_inf'], params['set_voltage_def'] = cf.simulControl(params['set_voltage_inf'], params['set_voltage_def'],params['desiredMass'],
+                params['current_mass'],lib.convert_lmin2kgs(-self.targetFlow),
+                lib.convert_lmin2kgs(self.flowValue_def),params['set_voltage_inf_base'],params['set_voltage_def_base'])
 
             # Including pressure offset
             pressure_diff = params['pressure_inside']
@@ -127,17 +133,18 @@ class RunPropValve:
                 return params
             if PRESSURE_OFFSET_WITHIN_LOOP_DEF == True:
                 if i%PRESSURE_OFFSET_INTERVAL == 0:  
-                    print("Setting baseline voltage deflation")                      
+                    # print("Setting baseline voltage deflation") 
+                    params['set_voltage_inf_base'] = lib.flow_start_voltage_pressure(pressure_diff,'inflation')                     
                     params['set_voltage_def_base'] = lib.flow_start_voltage_pressure(pressure_diff,'deflation')
             
             params['set_voltage_def'] += params['set_voltage_def_base']
             params['set_voltage_def'] = max(min(MAX_SET_VALUE, params['set_voltage_def']), MIN_SET_VALUE)
             
-            params['dac'].DAC8532_Out_Voltage(params['select_channel_inf'], 0) # 3 ms
+            params['dac'].DAC8532_Out_Voltage(params['select_channel_inf'],0) # params['set_voltage_inf_base']) # 3 ms
            
             params['dac'].DAC8532_Out_Voltage(params['select_channel_def'], params['set_voltage_def'])
-            print("flowValue deflation {} l/min  and {} mg".format(self.flowValue_def, lib.convert_lmin2kgs(self.flowValue_def) * 1e6))
-            self.flowValue_inf = 0
+            # print("flowValue deflation {} l/min  and {} mg".format(self.flowValue_def, lib.convert_lmin2kgs(self.flowValue_def) * 1e6))
+            self.flowValue_inf = lib.ReadSensirion(params['bus_inf'])
             self.flowValue_def = lib.ReadSensirion(params['bus_def'])
             
             sign = -1      
@@ -146,17 +153,17 @@ class RunPropValve:
         del_t_corrected = time.time() - time_loop_start
         # rospy.Subscriber("FlowSensorValues", FlowSensor, self.flowCallback)
        
-        print("del_t_corrected: ", del_t_corrected)
+        # print("del_t_corrected: ", del_t_corrected)
 
         params['current_mass'] = params['current_mass'] +  del_t_corrected * lib.convert_lmin2kgs(self.flowValue_inf) - del_t_corrected * lib.convert_lmin2kgs(self.flowValue_def)
         
-        print("Current mass inside the loop: ", params['current_mass'])
+        # print("Current mass inside the loop: ", params['current_mass'])
         params['Current_GT_mass'] = lib.computeMassDelta(pressureValue,p_before=0.0, r=287.058, t=293.15)                    
         params['t']= time.time() - params['t_start'] - params['time_spent'] 
-        print("Time: ", params['t']) 
+        # print("Time: ", params['t']) 
 
         timeOffset = time.time()-time_loop_start
-        print("Time offset: ", timeOffset)
+        # print("Time offset: ", timeOffset)
 
         i+=1
 
@@ -254,13 +261,15 @@ if __name__ == '__main__':
    
     pressure_inside = lib.convert_volt2pressure(param_dict['adc'].ADS1256_GetChannalValue(param_dict['pressure_channel']) * 5.0/0x7fffff)
 
+    rospy.Subscriber("ControlTargets",Control, rk.controlCallback)
     if pressure_inside < 10:
         print("pressure_inside less than 10...")
         rospy.set_param("current_mass",0)
     pub = rospy.Publisher('DataLogValues', DataLog, queue_size=100)
     rate = rospy.Rate(100)
     try:
-        while not rospy.is_shutdown():               
+        while not rospy.is_shutdown():
+            MASS_TOLERANCE = rospy.get_param("mass_tol")              
                 
 
             param_dict['current_mass'] = rospy.get_param("current_mass")
@@ -269,15 +278,19 @@ if __name__ == '__main__':
             
             param_dict['t_start'] = time.time()
             
-           
-            rospy.Subscriber("ControlTargets",Control, rk.controlCallback)
-            print("targetMass: ", rk.targetMass)
-            print("targetFlow: ", rk.targetFlow)
+            print(f"targetMass:  {rk.targetMass} targetFlow: {rk.targetFlow}")
             
             param_dict['stop'] = False
-            rate_logging = rospy.Rate(40)
+            # rate_logging = rospy.Rate(100)
+
+            rk.control_params['KP_inf'] = rospy.get_param('KP_inf')
+            rk.control_params['KD_inf'] = rospy.get_param('KD_inf')
+
+            rk.control_params['KP_def'] = rospy.get_param('KP_def')
+            rk.control_params['KD_def'] = rospy.get_param('KD_def')
+
             while (abs(param_dict['current_mass'] - rk.targetMass) >= MASS_TOLERANCE) and (param_dict['stop'] == False):
-                print("Target changed...actuating")
+                # print("Target changed...actuating")
                 
                 param_dict['time_loop_start'] = time.time()  
                 param_dict['desiredMass'] = rk.targetMass
@@ -286,11 +299,11 @@ if __name__ == '__main__':
                 param_dict['time_log'] = time.time() - param_dict['t_absolute_start'] 
 
                 if param_dict['do_log'] == True:
-                    pub.publish(param_dict['time_log'], rk.flowValue_inf,rk.flowValue_def,
-                        rk.targetMass, param_dict['pressure_inside'],param_dict['current_mass'],param_dict['Current_GT_mass'], rk.targetMass,
+                    pub.publish(param_dict['time_log'], rk.flowValue_inf,-rk.flowValue_def,
+                        rk.targetFlow, param_dict['pressure_inside'],param_dict['current_mass'] ,param_dict['Current_GT_mass'], rk.targetMass,
                         param_dict['set_voltage_inf'], param_dict['set_voltage_def'],param_dict['set_voltage_inf_base'],
                         param_dict['set_voltage_def_base'])
-                rate_logging.sleep()
+                # rate_logging.sleep()
 
                 print("Current mass after request complete: " + str(param_dict['current_mass'] * 1e6) + " mg")
                 rospy.set_param("current_mass", param_dict['current_mass'])
