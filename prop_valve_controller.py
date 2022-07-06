@@ -71,8 +71,8 @@ class RunPropValve:
 
     def runKelly(self, params):    
         time_loop_start = params['time_loop_start']
-        print("Target Mass: {} mg".format(params['desiredMass']*1e6))
-        print(f"Target flow: {self.targetFlow}")
+        # print("Target Mass: {} mg".format(params['desiredMass']*1e6))
+        # print(f"Target flow: {self.targetFlow}")
         i = params['i']
         
         # Setting baseline voltage for control
@@ -91,11 +91,11 @@ class RunPropValve:
         
         sense_current_def = 0    
         
-        cf = lib.ControlFlow(time.time(), self.control_params)
+        
         
         if params['current_mass'] < params['desiredMass']: 
 
-            params['set_voltage_inf'], params['set_voltage_def'] = cf.simulControl(params['set_voltage_inf'], params['set_voltage_def'],params['desiredMass'],
+            params['set_voltage_inf'], params['set_voltage_def'] = params['controller'].simulControl(params['set_voltage_inf'], params['set_voltage_def'],params['desiredMass'],
                 params['current_mass'],lib.convert_lmin2kgs(self.targetFlow),
                 lib.convert_lmin2kgs(self.flowValue_inf), params['set_voltage_inf_base'],params['set_voltage_def_base'])
              
@@ -120,7 +120,7 @@ class RunPropValve:
             sign = 1
             
         if params['current_mass'] >= params['desiredMass']:
-            params['set_voltage_inf'], params['set_voltage_def'] = cf.simulControl(params['set_voltage_inf'], params['set_voltage_def'],params['desiredMass'],
+            params['set_voltage_inf'], params['set_voltage_def'] = params['controller'].simulControl(params['set_voltage_inf'], params['set_voltage_def'],params['desiredMass'],
                 params['current_mass'],lib.convert_lmin2kgs(-self.targetFlow),
                 lib.convert_lmin2kgs(self.flowValue_def),params['set_voltage_inf_base'],params['set_voltage_def_base'])
 
@@ -129,7 +129,7 @@ class RunPropValve:
             if pressure_diff < 10:
                 params['current_mass'] = 0
                 params['stop'] = True
-                print("Finger empty... cannot deflate further")
+                # print("Finger empty... cannot deflate further")
                 return params
             if PRESSURE_OFFSET_WITHIN_LOOP_DEF == True:
                 if i%PRESSURE_OFFSET_INTERVAL == 0:  
@@ -232,6 +232,9 @@ if __name__ == '__main__':
             'KI_def' : 0,
             # controlKI = float(input("Integral Gain: "))
             
+            'D_inf' : 40,
+
+            'D_def' : 40,
             # Initialising time for the computation of the trajectory
             't' : 0,
 
@@ -244,7 +247,9 @@ if __name__ == '__main__':
 
             "do_log" : True,
 
-            "stop": False
+            "stop": False,
+
+            "controller" : None
         }
 
     #Initialising arrays for storing flow and pressure values for calculating movingaverage
@@ -273,12 +278,12 @@ if __name__ == '__main__':
                 
 
             param_dict['current_mass'] = rospy.get_param("current_mass")
-            print("Current mass from get_param: ", rospy.get_param("current_mass"))
+            # print("Current mass from get_param: ", rospy.get_param("current_mass"))
             
             
             param_dict['t_start'] = time.time()
             
-            print(f"targetMass:  {rk.targetMass} targetFlow: {rk.targetFlow}")
+            # print(f"targetMass:  {rk.targetMass} targetFlow: {rk.targetFlow}")
             
             param_dict['stop'] = False
             # rate_logging = rospy.Rate(100)
@@ -288,6 +293,11 @@ if __name__ == '__main__':
 
             rk.control_params['KP_def'] = rospy.get_param('KP_def')
             rk.control_params['KD_def'] = rospy.get_param('KD_def')
+
+            rk.control_params['D_inf'] = rospy.get_param('D_inf')
+            rk.control_params['D_def'] = rospy.get_param('D_def')
+
+            param_dict["controller"] = lib.ControlFlow(time.time(), rk.control_params)
 
             while (abs(param_dict['current_mass'] - rk.targetMass) >= MASS_TOLERANCE) and (param_dict['stop'] == False):
                 # print("Target changed...actuating")
@@ -305,8 +315,11 @@ if __name__ == '__main__':
                         param_dict['set_voltage_def_base'])
                 # rate_logging.sleep()
 
-                print("Current mass after request complete: " + str(param_dict['current_mass'] * 1e6) + " mg")
+                # print("Current mass after request complete: " + str(param_dict['current_mass'] * 1e6) + " mg")
                 rospy.set_param("current_mass", param_dict['current_mass'])
+                # loop_time = time.time() - param_dict["time_loop_start"]
+                # print(f"Control frequency: {1/loop_time} Hz")
+            print(f"current_mass: {param_dict['current_mass']}")
             param_dict['dac'].DAC8532_Out_Voltage(0x30, 0)
             param_dict['dac'].DAC8532_Out_Voltage(0x34, 0)
            

@@ -21,6 +21,9 @@ rospy.set_param("KD_inf",400)
 rospy.set_param("KP_def", 30000)
 rospy.set_param("KD_def", 200)
 
+rospy.set_param("D_inf", 40)
+rospy.set_param("D_def", 40)
+
 rospy.set_param("mass_tol", 0.01e-6)
 
 
